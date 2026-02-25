@@ -1,0 +1,11 @@
+# macOS files
+.DS_Store
+
+# Sensitive local files
+.env
+*.key
+*.pem
+
+# IDE folders
+.vscode/
+.idea/

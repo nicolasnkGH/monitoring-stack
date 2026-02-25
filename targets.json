@@ -1,0 +1,60 @@
+[
+  {
+    "targets": [
+      "dns.example.com:9100",
+      "dns2.example.com:9100"
+    ],
+    "labels": { 
+      "job": "dns_servers", 
+      "service": "technitium" 
+    }
+  },
+  {
+    "targets": [
+      "pve1.example.com:9100",
+      "pve2.example.com:9100",
+      "pve3.example.com:9100"
+    ],
+    "labels": { 
+      "job": "hypervisors", 
+      "service": "proxmox" 
+    }
+  },
+  {
+    "targets": [
+      "bazarr.example.com:9100",
+      "guacamole.example.com:9100",
+      "ha.example.com:9100",
+      "homarr.example.com:9100",
+      "immich.example.com:9100",
+      "jackett.example.com:9100",
+      "jelly.example.com:9100",
+      "keeptorrent.example.com:9100",
+      "lidarr.example.com:9100",
+      "n8n.example.com:9100",
+      "npm.example.com:9100",
+      "nextcloud.example.com:9100",
+      "omv.example.com:9100",
+      "omv2.example.com:9100",
+      "plex.example.com:9100",
+      "slskd.example.com:9100",
+      "torrent.example.com:9100",
+      "radarr.example.com:9100",
+      "sonarr.example.com:9100"
+    ],
+    "labels": { 
+      "job": "app_services", 
+      "location": "home_lab" 
+    }
+  },
+  {
+    "targets": [
+      "comfyui.example.com:9100",
+      "ai.example.com:9100"
+    ],
+    "labels": { 
+      "job": "ai_stack", 
+      "hardware": "rtx3090ti" 
+    }
+  }
+]

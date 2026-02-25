@@ -1,0 +1,56 @@
+name: Deploy Observability Stack
+
+# Trigger the workflow on pushes to the main branch
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted  # Use a self-hosted runner for deployment
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3  # Check out the repository code
+
+      # Step 1: Sync configuration files to the node
+      - name: Copy Configs to Node
+        uses: appleboy/scp-action@master  # Use SCP action to transfer files
+        with:
+          host: ${{ secrets.PI_HOST }}  # Host IP or hostname from GitHub Secrets
+          username: ${{ secrets.PI_USERNAME }}  # SSH username from GitHub Secrets
+          key: ${{ secrets.SSH_PRIVATE_KEY }}  # SSH private key from GitHub Secrets
+          source: "docker-compose.yml,prometheus.yml,targets.json"  # Source files to copy
+          target: "~/docker/monitoring/"  # Target directory on the remote node
+
+      # Step 2: Restart services on the Pi
+      - name: SSH and Restart Stack
+        uses: appleboy/ssh-action@master  # Use SSH action to execute commands remotely
+        with:
+          host: ${{ secrets.PI_HOST }}  # Host IP or hostname from GitHub Secrets
+          username: ${{ secrets.PI_USERNAME }}  # SSH username from GitHub Secrets
+          key: ${{ secrets.SSH_PRIVATE_KEY }}  # SSH private key from GitHub Secrets
+          script: |
+            cd ~/docker/monitoring
+            
+            # Injecting variables/secrets into .env file
+            echo "DOMAIN=${{ vars.DOMAIN }}" > .env  # Set DOMAIN variable
+            echo "NAS_LOG_PATH=${{ vars.NAS_LOG_PATH }}" >> .env  # Set NAS_LOG_PATH variable
+            echo "GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}" >> .env  # Set GRAFANA_PASSWORD variable
+            
+            # Deployment commands
+            docker compose pull  # Pull the latest Docker images
+            docker compose up -d --force-recreate  # Start or recreate containers
+            
+            # Improved Health Verification
+            echo "Verifying service status..."
+            # Count how many of the 4 specific services are 'running'
+            RUNNING_COUNT=$(docker ps --filter "status=running" --format "{{.Names}}" | grep -E "prometheus|grafana|cadvisor|loki" | wc -l)
+            
+            if [ "$RUNNING_COUNT" -ne "4" ]; then
+              echo "❌ Error: Only $RUNNING_COUNT/4 containers are healthy!"
+              docker compose ps  # Display the status of all containers
+              exit 1  # Exit with an error code
+            fi
+            
+            echo "✅ All 4 services are up and running."

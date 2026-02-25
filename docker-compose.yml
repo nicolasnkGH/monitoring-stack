@@ -1,0 +1,63 @@
+services:
+  # Prometheus Service
+  prometheus:
+    image: prom/prometheus:latest  # Official Prometheus Docker image
+    container_name: prometheus  # Name of the container
+    restart: unless-stopped  # Restart policy to ensure Prometheus is always running
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro  # Mount Prometheus configuration file
+      - ./targets.json:/etc/prometheus/targets.json:ro  # Mount targets JSON file for dynamic target discovery
+      - prometheus_data:/prometheus  # Volume to persist Prometheus data
+    ports:
+      - "9090:9090"  # Expose Prometheus web UI on port 9090
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'  # Command to start Prometheus with the configuration file
+      - '--web.external-url=https://prometheus.${DOMAIN}'  # Set external URL for Prometheus web UI
+
+  # Loki Service
+  loki:
+    image: grafana/loki:latest  # Official Loki Docker image
+    container_name: loki  # Name of the container
+    restart: unless-stopped  # Restart policy to ensure Loki is always running
+    volumes:
+      - loki_data:/loki  # Volume to persist Loki data
+    ports:
+      - "3100:3100"  # Expose Loki API on port 3100
+
+  # cAdvisor Service
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest  # Official cAdvisor Docker image
+    container_name: cadvisor  # Name of the container
+    ports:
+      - "8081:8080"  # Expose cAdvisor web UI on port 8081
+    volumes:
+      - /:/rootfs:ro  # Mount root filesystem to monitor system metrics
+      - /var/run:/var/run:ro  # Mount var/run for container metadata
+      - /sys:/sys:ro  # Mount sys filesystem for system statistics
+      - /var/lib/docker/:/var/lib/docker:ro  # Mount Docker lib directory for container stats
+      - /dev/disk/:/dev/disk:ro  # Mount disk devices for disk metrics
+    devices:
+      - /dev/kmsg  # Access kernel log messages
+    restart: unless-stopped  # Restart policy to ensure cAdvisor is always running
+
+  # Grafana Service
+  grafana:
+    image: grafana/grafana:latest  # Official Grafana Docker image
+    container_name: grafana  # Name of the container
+    restart: unless-stopped  # Restart policy to ensure Grafana is always running
+    environment:
+      - GF_SERVER_DOMAIN=grafana.${DOMAIN}  # Set domain for Grafana server
+      - GF_SERVER_ROOT_URL=https://grafana.${DOMAIN}/  # Set root URL for Grafana web UI
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}  # Set admin password using an environment variable
+      - GF_AUTH_ANONYMOUS_ENABLED=false  # Disable anonymous access to Grafana
+    volumes:
+      - grafana_data:/var/lib/grafana  # Volume to persist Grafana data
+      - ${NAS_LOG_PATH}:/var/log/grafana  # Mount log directory for Grafana logs
+    ports:
+      - "3000:3000"  # Expose Grafana web UI on port 3000
+    user: "472"  # Run Grafana as a specific user (UID 472)
+
+volumes:
+  prometheus_data:  # Volume for Prometheus data persistence
+  loki_data:  # Volume for Loki data persistence
+  grafana_data:  # Volume for Grafana data persistence
