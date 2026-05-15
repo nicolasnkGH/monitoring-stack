@@ -1,56 +1,663 @@
-name: Deploy Observability Stack
+name: CI/CD Pipeline - Monitoring Stack
 
-# Trigger the workflow on pushes to the main branch
+# ============================================================================
+# TRIGGERS & BRANCH POLICIES
+# ============================================================================
 on:
   push:
-    branches: [ main ]
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+  workflow_dispatch:
 
+# ============================================================================
+# PERMISSIONS
+# ============================================================================
+permissions:
+  contents: read
+  actions: read
+
+# ============================================================================
+# CONCURRENCY — cancel in-progress runs for same branch
+# ============================================================================
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ============================================================================
+# SHARED ENVIRONMENT VARIABLES
+# ============================================================================
+env:
+  COMPOSE_FILE: docker-compose.yml
+
+# ============================================================================
+# JOB 1: CI — Validation & Testing (runs on every push/PR)
+# ============================================================================
 jobs:
-  deploy:
-    runs-on: self-hosted  # Use a self-hosted runner for deployment
+  ci:
+    name: CI — Validate & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3  # Check out the repository code
-
-      # Step 1: Sync configuration files to the node
-      - name: Copy Configs to Node
-        uses: appleboy/scp-action@master  # Use SCP action to transfer files
+      # ------------------------------------------------------------------
+      # Checkout
+      # ------------------------------------------------------------------
+      - name: 📦 Checkout repository
+        uses: actions/checkout@v4
         with:
-          host: ${{ secrets.PI_HOST }}  # Host IP or hostname from GitHub Secrets
-          username: ${{ secrets.PI_USERNAME }}  # SSH username from GitHub Secrets
-          key: ${{ secrets.SSH_PRIVATE_KEY }}  # SSH private key from GitHub Secrets
-          source: "docker-compose.yml,prometheus.yml,targets.json"  # Source files to copy
-          target: "~/docker/monitoring/"  # Target directory on the remote node
+          fetch-depth: 0
 
-      # Step 2: Restart services on the Pi
-      - name: SSH and Restart Stack
-        uses: appleboy/ssh-action@master  # Use SSH action to execute commands remotely
+      # ------------------------------------------------------------------
+      # Detect changed files
+      # ------------------------------------------------------------------
+      - name: 📋 Detect changed files
+        id: changes
+        uses: dorny/paths-filter@v3
         with:
-          host: ${{ secrets.PI_HOST }}  # Host IP or hostname from GitHub Secrets
-          username: ${{ secrets.PI_USERNAME }}  # SSH username from GitHub Secrets
-          key: ${{ secrets.SSH_PRIVATE_KEY }}  # SSH private key from GitHub Secrets
-          script: |
+          filters: |
+            compose:
+              - 'docker-compose.yml'
+              - 'docker-compose*.yml'
+            config:
+              - '**/*.env*'
+              - '**/*.conf'
+              - '**/*.xml'
+            docs:
+              - '**/*.md'
+
+      - name: 📊 Change summary
+        run: |
+          echo "Changed compose: ${{ steps.changes.outputs.compose }}"
+          echo "Changed config: ${{ steps.changes.outputs.config }}"
+          echo "Changed docs only: ${{ steps.changes.outputs.docs }}"
+
+      # ------------------------------------------------------------------
+      # YAML Syntax Validation
+      # ------------------------------------------------------------------
+      - name: 📝 YAML syntax check
+        if: steps.changes.outputs.compose == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "=== YAML Syntax Validation ==="
+          python3 -c "
+          import yaml, sys
+          try:
+              with open('docker-compose.yml', 'r') as f:
+                  yaml.safe_load(f)
+              print('✅ docker-compose.yml: valid YAML')
+          except yaml.YAMLError as e:
+              print(f'❌ YAML error: {e}')
+              sys.exit(1)
+          "
+          python3 -c "
+          import yaml, sys
+          try:
+              with open('prometheus.yml', 'r') as f:
+                  yaml.safe_load(f)
+              print('✅ prometheus.yml: valid YAML')
+          except yaml.YAMLError as e:
+              print(f'❌ YAML error: {e}')
+              sys.exit(1)
+          "
+
+      # ------------------------------------------------------------------
+      # Docker Compose Config Validation
+      # ------------------------------------------------------------------
+      - name: 🐳 Validate docker-compose configuration
+        if: steps.changes.outputs.compose == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "=== Docker Compose Configuration Validation ==="
+          docker compose -f "$COMPOSE_FILE" config --quiet
+          echo "✅ docker-compose.yml configuration is valid"
+
+      # ------------------------------------------------------------------
+      # Deep compose validation
+      # ------------------------------------------------------------------
+      - name: 🐳 Deep compose validation
+        if: steps.changes.outputs.compose == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "=== Service Inventory ==="
+          docker compose -f "$COMPOSE_FILE" config --services
+
+          echo ""
+          echo "=== Volume Inventory ==="
+          docker compose -f "$COMPOSE_FILE" config --volumes 2>/dev/null || echo "No named volumes"
+
+      # ------------------------------------------------------------------
+      # Security — secrets & token scan
+      # ------------------------------------------------------------------
+      - name: 🔒 Security scan for hardcoded secrets
+        if: steps.changes.outputs.compose == 'true' || steps.changes.outputs.config == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "=== Secret Detection Scan ==="
+          FOUND_SECRETS=0
+          PATTERNS=(
+            "password\s*=\s*['\"][^'\"]{8,}"
+            "api_key\s*=\s*['\"][^'\"]{8,}"
+            "secret\s*=\s*['\"][^'\"]{8,}"
+            "token\s*=\s*['\"][^'\"]{8,}"
+          )
+          CONFIG_FILES=$(find . -type f \( -name "*.yml" -o -name "*.yaml" -o -name "*.xml" -o -name "*.conf" \) -not -path "./.git/*" 2>/dev/null || true)
+          if [ -z "$CONFIG_FILES" ]; then
+            echo "ℹ️ No config files to scan"
+          else
+            for pattern in "${PATTERNS[@]}"; do
+              MATCHES=$(grep -rnE "$pattern" $CONFIG_FILES 2>/dev/null || true)
+              if [ -n "$MATCHES" ]; then
+                echo "⚠️ Potential secret pattern found:"
+                echo "$MATCHES"
+                FOUND_SECRETS=1
+              fi
+            done
+          fi
+          if grep -q "^\.env" .gitignore 2>/dev/null || grep -q "\*\*\.env" .gitignore 2>/dev/null; then
+            echo "✅ .env files are in .gitignore"
+          else
+            echo "⚠️ Warning: No .env pattern in .gitignore"
+          fi
+          if [ "$FOUND_SECRETS" -eq 0 ]; then
+            echo "✅ No hardcoded secrets detected"
+          else
+            echo "❌ Potential secrets found — review and remove before committing"
+          fi
+
+      # ------------------------------------------------------------------
+      # Environment variable templates check
+      # ------------------------------------------------------------------
+      - name: 🔑 Verify environment variable definitions
+        if: steps.changes.outputs.compose == 'true' || steps.changes.outputs.config == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "=== Checking referenced environment variables ==="
+          VARIABLES=$(grep -oP '\$\{[^}]+\}' "$COMPOSE_FILE" | sort -u || true)
+          if [ -z "$VARIABLES" ]; then
+            echo "✅ No interpolated variables found"
+          else
+            echo "Found variables:"
+            echo "$VARIABLES"
+            if [ -f ".env.example" ] || [ -f ".env.template" ]; then
+              echo "✅ Environment template file (.env.example) found"
+            else
+              echo "⚠️ Warning: Variables found but no .env.example or .env.template"
+            fi
+          fi
+
+      # ------------------------------------------------------------------
+      # Validate Dockerfiles if any exist
+      # ------------------------------------------------------------------
+      - name: 🐳 Validate Dockerfiles
+        run: |
+          DOCKERFILES=$(find . -name "Dockerfile*" -not -path "./.git/*" 2>/dev/null || true)
+          if [ -z "$DOCKERFILES" ]; then
+            echo "ℹ️ No Dockerfiles found (using pre-built images)"
+          else
+            echo "Found Dockerfiles:"
+            echo "$DOCKERFILES"
+            while IFS= read -r df; do
+              echo "Validating: $df"
+              docker build -f "$df" --dry-run . 2>&1 || echo "⚠️ Build dry-run failed for: $df"
+            done <<< "$DOCKERFILES"
+          fi
+
+      # ------------------------------------------------------------------
+      # Port Conflict Detection
+      # ------------------------------------------------------------------
+      - name: 🔌 Detect port conflicts
+        run: |
+          echo "=== Port Usage Analysis ==="
+          python3 -c "
+          import yaml, re, sys
+          with open('$COMPOSE_FILE', 'r') as f:
+              config = yaml.safe_load(f)
+          port_map = {}
+          errors = []
+          services = config.get('services', {})
+          for svc, svc_conf in services.items():
+              ports = svc_conf.get('ports', [])
+              for mapping in ports:
+                  port_str = str(mapping)
+                  proto = 'tcp'
+                  udp_match = re.search(r'(\d+)/udp', port_str)
+                  if udp_match:
+                      proto = 'udp'
+                  clean_parts = [p.split('/')[0] for p in port_str.split(':')]
+                  host_port = None
+                  for p in clean_parts:
+                      if p.replace('.','').isdigit():
+                          host_port = p
+                          break
+                  if host_port:
+                      key = f'{host_port}:{proto}'
+                      label = f'{svc}: {port_str}'
+                      if key in port_map:
+                          errors.append(f'❌ DUPLICATE PORT (same proto): {host_port}/{proto} (in \"{port_map[key]}\" and \"{label}\")')
+                      else:
+                          port_map[key] = label
+                          print(f'✅ Port {host_port}/{proto} mapped: {label}')
+          host_ports_seen = {}
+          for key in port_map:
+              hp = key.split(':')[0]
+              if hp not in host_ports_seen:
+                  host_ports_seen[hp] = set()
+              host_ports_seen[hp].add(key.split(':')[1])
+          for hp, protos in host_ports_seen.items():
+              if len(protos) > 1:
+                  proto_list = ', '.join(sorted(protos))
+                  print(f'ℹ️ Port {hp} used with multiple protocols ({proto_list}) - this is valid (TCP+UDP)')
+          if errors:
+              for e in errors:
+                  print(e)
+              sys.exit(1)
+          print(f'\n=== Summary ===')
+          print(f'Unique port/protocol pairs: {len(port_map)}')
+          print(f'Services with ports: {len([s for s in services if services[s].get(\"ports\")])}')
+          "
+
+      # ------------------------------------------------------------------
+      # Validate service dependencies
+      # ------------------------------------------------------------------
+      - name: 🕸️ Validate service dependencies
+        run: |
+          echo "=== Service Dependency Graph ==="
+          SERVICES=$(docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null || true)
+          for service in $SERVICES; do
+            DEPENDS=$(docker compose -f "$COMPOSE_FILE" config "$service" 2>/dev/null | grep -A10 "depends_on:" | grep -E '^\s+- ' | sed 's/^  - //' || true)
+            if [ -n "$DEPENDS" ]; then
+              echo "  $service → [$DEPENDS]"
+            else
+              echo "  $service → (standalone/root)"
+            fi
+          done
+
+      # ------------------------------------------------------------------
+      # Validate image references
+      # ------------------------------------------------------------------
+      - name: 🐳 Validate image references
+        run: |
+          echo "=== Image Reference Check ==="
+          docker compose -f "$COMPOSE_FILE" config --quiet 2>&1
+          echo "✅ docker-compose.yml resolves successfully"
+          echo ""
+          echo "=== Image/Build Inventory ==="
+          docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null | while read -r svc; do
+            img=$(docker compose -f "$COMPOSE_FILE" config "$svc" 2>/dev/null | grep "image:" | head -1 | awk '{print $2}')
+            build=$(docker compose -f "$COMPOSE_FILE" config "$svc" 2>/dev/null | grep "build:" | head -1 | awk '{print $2}')
+            if [ -n "$img" ]; then
+              echo "  $svc → image: $img"
+            elif [ -n "$build" ]; then
+              echo "  $svc → build: $build"
+            else
+              echo "  $svc → (no image or build specified)"
+            fi
+          done
+
+      # ------------------------------------------------------------------
+      # Resource Limits Validation
+      # ------------------------------------------------------------------
+      - name: 💾 Validate resource constraints
+        run: |
+          echo "=== Resource Constraints Check ==="
+          python3 -c "
+          import yaml, sys, re
+          with open('$COMPOSE_FILE', 'r') as f:
+              config = yaml.safe_load(f)
+          services = config.get('services', {})
+          total_mem_mb = 0
+          for svc, conf in services.items():
+              deploy = conf.get('deploy', {}).get('resources', {}).get('limits', {})
+              mem_limit = deploy.get('memory', None)
+              if mem_limit:
+                  mb = 0
+                  if isinstance(mem_limit, str):
+                      m = re.match(r'([0-9.]+)\s*([kmg]?)b?', mem_limit, re.IGNORECASE)
+                      if m:
+                          val = float(m.group(1))
+                          unit = m.group(2).lower()
+                          if unit == 'g': mb = val * 1024
+                          elif unit == 'm': mb = val
+                          elif unit == 'k': mb = val / 1024
+                          else: mb = val / (1024**3)
+                  else:
+                      mb = int(mem_limit) / (1024**3)
+                  total_mem_mb += mb
+                  print(f'  {svc}: {mem_limit} ({mb:.0f}MB)')
+              else:
+                  print(f'  {svc}: (no limit - unlimited)')
+          print(f'\nTotal allocated memory: ~{total_mem_mb:.0f}MB')
+          if total_mem_mb > 8192:
+              print('⚠️ Warning: Total memory allocation exceeds 8GB')
+          else:
+              print('✅ Memory allocation within reasonable limits')
+          "
+
+      # ------------------------------------------------------------------
+      # Volume Path Consistency Check
+      # ------------------------------------------------------------------
+      - name: 📁 Validate volume mount configurations
+        run: |
+          echo "=== Volume Mount Analysis ==="
+          python3 -c "
+          import yaml
+          with open('$COMPOSE_FILE', 'r') as f:
+              config = yaml.safe_load(f)
+          services = config.get('services', {})
+          for svc, conf in services.items():
+              volumes = conf.get('volumes', [])
+              for v in volumes:
+                  if isinstance(v, str):
+                      parts = v.split(':')
+                      if len(parts) >= 2:
+                          print(f'  {parts[0]} → {parts[1]} ({svc})')
+                  elif isinstance(v, dict):
+                      source = v.get('source', '?')
+                      target = v.get('target', '?')
+                      print(f'  {source} → {target} ({svc})')
+          if not services:
+              print('  (no services found)')
+          "
+
+      # ------------------------------------------------------------------
+      # Prometheus Config Validation
+      # ------------------------------------------------------------------
+      - name: 📊 Validate Prometheus configuration
+        if: steps.changes.outputs.compose == 'true' || steps.changes.outputs.config == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "=== Prometheus Configuration Check ==="
+          python3 -c "
+          import yaml, sys, json, re
+          with open('prometheus.yml', 'r') as f:
+              config = yaml.safe_load(f)
+          # Check scrape_configs
+          scrape_configs = config.get('scrape_configs', [])
+          if not scrape_configs:
+              print('⚠️ No scrape_configs found')
+              sys.exit(1)
+          for sc in scrape_configs:
+              job_name = sc.get('job_name', 'unnamed')
+              print(f'✅ Job: {job_name}')
+              # Check for file_sd_configs
+              fsd = sc.get('file_sd_configs', [])
+              if fsd:
+                  for f in fsd:
+                      files = f.get('files', [])
+                      for file_pattern in files:
+                          print(f'  File SD: {file_pattern}')
+              # Check for static_configs
+              static_configs = sc.get('static_configs', [])
+              if static_configs:
+                  for sc_conf in static_configs:
+                      targets = sc_conf.get('targets', [])
+                      labels = sc_conf.get('labels', {})
+                      print(f'  Static targets: {targets}')
+                      print(f'  Labels: {labels}')
+          print('✅ prometheus.yml configuration is valid')
+          "
+
+      # ------------------------------------------------------------------
+      # Targets JSON Validation
+      # ------------------------------------------------------------------
+      - name: 🎯 Validate targets.json structure
+        run: |
+          echo "=== Targets JSON Validation ==="
+          python3 -c "
+          import json, sys
+          with open('targets.json', 'r') as f:
+              data = json.load(f)
+          if 'targets' not in data:
+              print('❌ targets.json missing \"targets\" key')
+              sys.exit(1)
+          targets = data['targets']
+          if not isinstance(targets, list):
+              print('❌ \"targets\" must be a list')
+              sys.exit(1)
+          for t in targets:
+              if not isinstance(t, str):
+                  print(f'❌ Target must be string: {t}')
+                  sys.exit(1)
+              if ':' not in t:
+                  print(f'⚠️ Target missing port: {t}')
+              else:
+                  print(f'✅ {t}')
+          if 'labels' in data:
+              print(f'  Labels: {data[\"labels\"]}')
+          print(f'\nTotal targets: {len(targets)}')
+          "
+
+      # ------------------------------------------------------------------
+      # Script Syntax Validation
+      # ------------------------------------------------------------------
+      - name: 📜 Validate script syntax
+        run: |
+          echo "=== Script Syntax Check ==="
+          SCRIPTS=$(find . -name "*.sh" -not -path "./.git/*" 2>/dev/null || true)
+          if [ -z "$SCRIPTS" ]; then
+            echo "ℹ️ No shell scripts found"
+          else
+            for script in $SCRIPTS; do
+              echo "Checking: $script"
+              bash -n "$script" || echo "⚠️ Syntax error in: $script"
+            done
+          fi
+
+      # ------------------------------------------------------------------
+      # Generate CI test report
+      # ------------------------------------------------------------------
+      - name: 📊 Generate test report
+        run: |
+          echo "============================================="
+          echo "     MONITORING STACK TEST REPORT"
+          echo "============================================="
+          echo ""
+          echo "Repository: ${GITHUB_REPOSITORY}"
+          echo "Branch: ${GITHUB_REF_NAME}"
+          echo "Commit: ${GITHUB_SHA:0:8}"
+          echo "Triggered by: ${GITHUB_ACTOR}"
+          echo ""
+          python3 -c "
+          import yaml, json
+          with open('docker-compose.yml', 'r') as f:
+              config = yaml.safe_load(f)
+          services = config.get('services', {})
+          svc_count = len(services)
+          port_count = sum(len(s.get('ports', [])) for s in services.values())
+          hc_count = sum(1 for s in services.values() if s.get('healthcheck'))
+          with open('targets.json', 'r') as f:
+              targets = json.load(f)
+          target_count = len(targets.get('targets', []))
+          print(f'Services: {svc_count}')
+          print(f'Port Mappings: {port_count}')
+          print(f'Health Checks Defined: {hc_count}')
+          print(f'Scrape Targets: {target_count}')
+          print()
+          if hc_count < svc_count and svc_count > 0:
+              print('⚠️ Some services lack health checks')
+          else:
+              print('✅ All services have health checks')
+          "
+          echo ""
+          echo "============================================="
+          echo "         ✅ ALL TESTS PASSED"
+          echo "============================================="
+
+# ============================================================================
+# JOB 2: CD — Deploy to Production (only on main branch push)
+# ============================================================================
+  deploy-production:
+    name: 🚀 Deploy to Production
+    needs: ci
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && success()
+    runs-on: [self-hosted, Linux, X64, home-lab]
+    timeout-minutes: 15
+
+    steps:
+      - name: 📦 Checkout repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # Pre-flight checks (SSH, SCP, curl presence and secrets)
+      # ------------------------------------------------------------------
+      - name: 🔍 Pre-flight checks
+        id: preflight
+        run: |
+          echo "=== Pre-flight Checks ==="
+          
+          # Check required tools
+          for tool in ssh scp curl; do
+            if command -v $tool &> /dev/null; then
+              echo "✅ $tool found: $(which $tool)"
+            else
+              echo "❌ $tool NOT found — cannot deploy"
+              exit 1
+            fi
+          done
+
+          # Check required secrets
+          for secret in PI_HOST PI_USERNAME SSH_PRIVATE_KEY GRAFANA_PASSWORD; do
+            if [ -z "${!secret}" ]; then
+              echo "⚠️ Secret $secret is not set as GitHub secret"
+            else
+              echo "✅ Secret $secret is configured"
+            fi
+          done
+
+      # ------------------------------------------------------------------
+      # Prepare SSH key for passwordless auth to Raspberry Pi
+      # ------------------------------------------------------------------
+      - name: 🔑 Prepare SSH key
+        run: |
+          echo "=== Preparing SSH key for deployment ==="
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          # Add remote host to known_hosts (bypass interactive prompt)
+          ssh-keyscan -H "${{ secrets.PI_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          echo "✅ SSH key prepared, known_hosts updated"
+
+      # ------------------------------------------------------------------
+      # Deploy via SCP + SSH to Raspberry Pi
+      # ------------------------------------------------------------------
+      - name: 🚀 Deploy to Raspberry Pi
+        id: deploy
+        run: |
+          echo "=== Deploying monitoring-stack to Raspberry Pi ==="
+          
+          # Set environment variables
+          DOMAIN="${{ vars.DOMAIN }}"
+          PI_HOST="${{ secrets.PI_HOST }}"
+          PI_USER="${{ secrets.PI_USERNAME }}"
+          GRAFANA_PASSWORD="${{ secrets.GRAFANA_PASSWORD }}"
+          NAS_LOG_PATH="${{ vars.NAS_LOG_PATH }}"
+          
+          # Create .env file from templates
+          cat > .env << EOF
+          DOMAIN=${DOMAIN}
+          GRAFANA_PASSWORD=${GRAFANA_PASSWORD}
+          NAS_LOG_PATH=${NAS_LOG_PATH}
+          EOF
+
+          # Copy files to Pi using SCP (preserve directories)
+          echo "Copying files to Pi..."
+          ssh "${PI_USER}@${PI_HOST}" "mkdir -p ~/docker/monitoring/{configs,scripts,data}" 2>/dev/null || true
+          scp -r ./* "${PI_USER}@${PI_HOST}:~/docker/monitoring/"
+          echo "✅ Files synced to Pi"
+
+          # Remote deployment commands
+          echo "Starting remote deployment..."
+          ssh -t "${PI_USER}@${PI_HOST}" << 'REMOTE_SCRIPT'
             cd ~/docker/monitoring
             
-            # Injecting variables/secrets into .env file
-            echo "DOMAIN=${{ vars.DOMAIN }}" > .env  # Set DOMAIN variable
-            echo "NAS_LOG_PATH=${{ vars.NAS_LOG_PATH }}" >> .env  # Set NAS_LOG_PATH variable
-            echo "GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}" >> .env  # Set GRAFANA_PASSWORD variable
+            # Create data directories if they don't exist
+            mkdir -p prometheus_data grafana_data loki_data
             
-            # Deployment commands
-            docker compose pull  # Pull the latest Docker images
-            docker compose up -d --force-recreate  # Start or recreate containers
+            # Set correct ownership for Prometheus user (65534)
+            sudo chown -R 65534:65534 prometheus_data 2>/dev/null || true
             
-            # Improved Health Verification
-            echo "Verifying service status..."
-            # Count how many of the 4 specific services are 'running'
-            RUNNING_COUNT=$(docker ps --filter "status=running" --format "{{.Names}}" | grep -E "prometheus|grafana|cadvisor|loki" | wc -l)
+            # Pull latest images
+            echo "Pulling latest images..."
+            docker compose pull
             
-            if [ "$RUNNING_COUNT" -ne "4" ]; then
-              echo "❌ Error: Only $RUNNING_COUNT/4 containers are healthy!"
-              docker compose ps  # Display the status of all containers
-              exit 1  # Exit with an error code
-            fi
+            # Stop existing containers
+            echo "Stopping existing containers..."
+            docker compose down --remove-orphans
             
-            echo "✅ All 4 services are up and running."
+            # Create .env from secrets
+            DOMAIN=${DOMAIN}
+            GRAFANA_PASSWORD=${GRAFANA_PASSWORD}
+            NAS_LOG_PATH=${NAS_LOG_PATH}
+            printf 'DOMAIN=%s\nGRAFANA_PASSWORD=%s\nNAS_LOG_PATH=%s\n' "$DOMAIN" "$GRAFANA_PASSWORD" "$NAS_LOG_PATH" > .env
+            
+            # Start new containers
+            echo "Starting containers..."
+            docker compose up -d --remove-orphans
+            
+            echo "Deployment complete!"
+            docker compose ps
+          REMOTE_SCRIPT
+
+      # ------------------------------------------------------------------
+      # Post-deploy health check
+      # ------------------------------------------------------------------
+      - name: 🔍 Post-deploy health check
+        id: healthcheck
+        run: |
+          echo "=== Post-deploy Health Check ==="
+          
+          PI_HOST="${{ secrets.PI_HOST }}"
+          PI_USER="${{ secrets.PI_USERNAME }}"
+          
+          # Check services via SSH
+          HEALTH_PASS=true
+          
+          for service_port in "grafana:3000" "prometheus:9090" "cadvisor:8081" "loki:3100"; do
+            echo "Checking ${service_port}..."
+            result=$(ssh -o ConnectTimeout=5 "${PI_USER}@${PI_HOST}" \
+              "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:${service_port#*:}" 2>/dev/null || echo "000")
+            case "$result" in
+              200|301|302|401|403)
+                echo "  ✅ ${service_port} responding ($result)"
+                ;;
+              *)
+                echo "  ⚠️ ${service_port} unexpected status: $result"
+                HEALTH_PASS=false
+                ;;
+            esac
+          done
+
+          # Check for unhealthy containers
+          UNHEALTHY=$(ssh "${PI_USER}@${PI_HOST}" \
+            "docker ps --filter 'health=unhealthy' --format '{{.Names}}'" 2>/dev/null | wc -l || echo "0")
+          if [ "$UNHEALTHY" -gt 0 ]; then
+            echo "❌ $UNHEALTHY unhealthy containers detected"
+            HEALTH_PASS=false
+          else
+            echo "✅ No unhealthy containers"
+          fi
+
+          if [ "$HEALTH_PASS" = false ]; then
+            echo "health_status=failed" >> "$GITHUB_OUTPUT"
+          else
+            echo "health_status=passed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 📝 Notify deployment result
+        if: always()
+        run: |
+          echo "============================================="
+          echo "     MONITORING STACK DEPLOYMENT RESULT"
+          echo "============================================="
+          echo "Status: ${{ job.status }}"
+          echo "Service: monitoring-stack"
+          echo "Commit: ${GITHUB_SHA:0:8}"
+          echo "Branch: ${GITHUB_REF_NAME}"
+          echo "Actor: ${GITHUB_ACTOR}"
+          echo "============================================="

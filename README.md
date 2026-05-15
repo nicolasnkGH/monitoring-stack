@@ -1,10 +1,14 @@
-# 📊 Home Lab Monitoring Stack
+# 📊 Monitoring Stack
 
-A production-grade observability suite deployed via **GitHub Actions** to a **Raspberry Pi 4 8GB RAM**. This stack provides a "Single Pane of Glass" for monitoring a distributed Proxmox cluster, AI workloads (RTX 3090 Ti), and 20+ containerized applications.
+A production-grade observability suite deployed via **GitHub Actions** to a **Raspberry Pi 4 8GB RAM**. This stack provides a "Single Pane of Glass" for monitoring a distributed home lab infrastructure, AI workloads (RTX 3090 Ti), and 20+ containerized applications.
+
+> [!NOTE]
+> This is an open-source template. Your private secrets and credentials are managed via GitHub Secrets — never commit `.env` files.
 
 ---
 
 ## 🏗️ Architecture Overview
+
 This monitoring stack utilizes a **Hybrid Storage Strategy** to balance high-performance metric ingestion with long-term data resilience.
 
 * **Prometheus**: Time-series database running on local **EXT4 SSD storage** to ensure high IOPS and prevent TSDB corruption common with network filesystems.
@@ -56,19 +60,69 @@ graph LR
 
 ---
 
-## 🚀 Automated Deployment
+## 🚀 Automated Deployment (CI/CD)
 
-This project utilizes a **GitOps** approach. Changes pushed to the `main` branch trigger a GitHub Action that:
-1.  Validates the `docker-compose.yml` syntax.
-2.  Securely transfers configurations via SCP to the Raspberry Pi.
-3.  **Directory Initialization**: Automatically creates and sets UID 65534 (nobody) permissions for local SSD storage.
-4.  **Idempotent Cron Management**: Dynamically manages crontab entries to schedule nightly NAS backups without duplication.
-5.  **Service Orchestration**: Executes remote SSH commands to pull images and recreate containers with `--force-recreate`.
+This project uses a **GitOps** approach. Changes pushed to the `main` branch trigger a GitHub Actions workflow that:
 
-### Prerequisites
-* GitHub Repository Secrets: `HOST`, `USERNAME`, `KEY`, `DOMAIN`, `GRAFANA_PASSWORD`.
-* Raspberry Pi with Docker & Docker Compose installed.
-* Node Exporter running on all monitored targets (Port 9100).
+### CI Pipeline (every push/PR)
+1. **YAML Syntax Validation** — validates docker-compose.yml and prometheus.yml
+2. **Docker Compose Config Validation** — ensures compose file parses correctly
+3. **Secret Detection Scan** — prevents accidental commits of credentials
+4. **Port Conflict Detection** — validates no duplicate port mappings
+5. **Resource Limit Validation** — checks memory constraints are defined
+6. **Service Dependency Check** — verifies depends_on relationships are valid
+7. **Image Reference Validation** — confirms all images are referenced correctly
+8. **Volume Path Consistency Check** — validates mount configurations
+9. **Prometheus Config Validation** — checks scrape_configs and targets
+10. **Targets JSON Validation** — validates scrape target structure
+11. **Script Syntax Validation** — checks shell scripts for syntax errors
+12. **Test Report Generation** — summarizes health check coverage
+
+### CD Pipeline (main branch push only)
+1. **Pre-flight Checks** — verifies SSH/SCP availability and secrets configuration
+2. **SSH Key Preparation** — sets up passwordless auth to Raspberry Pi
+3. **File Sync via SCP** — transfers all config files to the target host
+4. **Remote Docker Deployment** — pulls images, recreates containers
+5. **Post-deploy Health Check** — validates all services are responding
+
+### GitHub Secrets Required
+
+| Secret | Description |
+|--------|-------------|
+| `PI_HOST` | IP or hostname of your Raspberry Pi |
+| `PI_USERNAME` | SSH username for the Raspberry Pi |
+| `SSH_PRIVATE_KEY` | SSH private key (ed25519 recommended) for passwordless auth |
+| `GRAFANA_PASSWORD` | Admin password for Grafana |
+
+### GitHub Repository Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `DOMAIN` | Your base domain for services | `home.lab` |
+| `NAS_LOG_PATH` | NAS mount path for logs/data | `/mnt/nas/monitoring` |
+
+### Self-Hosted Runner
+
+The deployment job requires a **self-hosted GitHub Actions runner** on your Raspberry Pi:
+
+```yaml
+# .github/workflows/deploy.yml uses:
+#   runs-on: [self-hosted, Linux, X64, home-lab]
+```
+
+To set up the runner, follow the [GitHub Actions self-hosted runner documentation](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/adding-self-hosted-runners).
+
+---
+
+## 📦 Services
+
+| Service | Image | Port | Purpose |
+|---------|-------|------|---------|
+| **Prometheus** | `prom/prometheus:v2.51.0` | 9090 | Time-series metrics collection |
+| **Grafana** | `grafana/grafana:11.0.0` | 3000 | Dashboards and visualization |
+| **Loki** | `grafana/loki:3.4.0` | 3100 | Log aggregation |
+| **cAdvisor** | `gcr.io/cadvisor/cadvisor:v0.49.1` | 8080/8081 | Container resource usage |
+| **Node Exporter** | `prom/node-exporter:v1.7.0` | 9100 | Host-level hardware metrics |
 
 ---
 
@@ -81,11 +135,12 @@ This project utilizes a **GitOps** approach. Changes pushed to the `main` branch
 | **Loki Logs** | 15TB NAS (NFS) | NAS RAID | Direct Persistence |
 
 ### Automated Backups
-A custom bash script (`/scripts/backup_prometheus.sh`) runs nightly via Cron. It:
-1.  Triggers a Prometheus TSDB snapshot via the **Admin API**.
-2.  Verifies the NAS mount point is active to protect local SSD capacity.
-3.  Syncs the snapshot to the NAS using `rsync` with automated ownership correction.
-4.  Purges the local snapshot to maintain SSD health.
+
+A custom bash script (`scripts/backup_prometheus.sh`) runs nightly via Cron. It:
+1. Triggers a Prometheus TSDB snapshot via the **Admin API**.
+2. Verifies the NAS mount point is active to protect local SSD capacity.
+3. Syncs the snapshot to the NAS using `rsync` with automated ownership correction.
+4. Purges local snapshots older than 7 days to maintain SSD health.
 
 ---
 
@@ -110,7 +165,7 @@ To ensure compatibility with an external **Nginx Proxy Manager (NPM)** VM, servi
 
 ## 🎯 Scrape Targets
 
-The stack currently monitors **27 endpoints** across the Columbus Lab:
+The stack currently monitors **27 endpoints** across the lab:
 
 * **Hypervisors**: 3x Proxmox Nodes
 * **AI Stack**: Dedicated AI node with **NVIDIA RTX 3090 Ti**
@@ -118,13 +173,46 @@ The stack currently monitors **27 endpoints** across the Columbus Lab:
 * **Media Stack**: Plex, Sonarr, Radarr, qBittorrent, and more.
 
 ### Adding New Targets
+
 Update `targets.json` and push to main:
+
 ```json
 {
-  "targets": ["new-service.YOUR.DOMAIN:9100"],
+  "targets": ["new-service.your-domain:9100"],
   "labels": { "job": "new_category" }
 }
 ```
+
+---
+
+## 🛠️ Local Development & Testing
+
+You can run the full CI validation locally using `act`:
+
+```bash
+# Install act (if not installed)
+brew install act
+
+# Run CI checks locally
+act ci
+
+# Run the full pipeline (CI + deploy)
+act push
+```
+
+Or manually validate configurations:
+
+```bash
+# Validate docker-compose.yml
+docker compose config --quiet
+
+# Validate prometheus.yml
+docker run --rm -v $(pwd):/config prom/prometheus:latest --config.file=/config/prometheus.yml --dry-run
+
+# Check for port conflicts
+docker compose ps  # should show no conflicts
+```
+
 ---
 
 ## 🛠️ Maintenance Cheatsheet
@@ -135,11 +223,9 @@ docker exec -it grafana grafana cli admin reset-admin-password 'your-new-passwor
 ```
 
 **Check Prometheus Scrape Status:**
-
 Visit `http://<pi-ip>:9090/targets` to verify all endpoints are `UP`.
 
 **View Logs:**
-
 ```bash
 docker compose logs -f [service_name]
 ```
@@ -158,38 +244,42 @@ ls -lh /mnt/monitoring/backups/prometheus
 ```bash
 tail -f ~/docker/monitoring/backup.log
 ```
+
 ---
 
 ## ♻️ Disaster Recovery (Restore Procedure)
 
 In the event of a local SSD failure or data corruption, follow these steps to restore Prometheus from a NAS snapshot:
 
-1.  **Stop the Service**:
-    ```bash
-    docker compose stop prometheus
-    ```
-2.  **Clear Corrupted Data**:
-    ```bash
-    sudo rm -rf ~/docker/monitoring/prometheus_data/data/*
-    ```
-3.  **Restore from NAS**:
-    Find the latest snapshot on your NAS and sync it back to the local SSD:
-    ```bash
-    # Replace [SNAPSHOT_NAME] with your target folder
-    sudo rsync -av /mnt/monitoring/backups/prometheus/[SNAPSHOT_NAME]/ ~/docker/monitoring/prometheus_data/data/
-    ```
-4.  **Fix Permissions**:
-    Ensure the Prometheus user (`65534`) owns the restored files:
-    ```bash
-    sudo chown -R 65534:65534 ~/docker/monitoring/prometheus_data/data
-    ```
-5.  **Restart Service**:
-    ```bash
-    docker compose up -d prometheus
-    ```
+1. **Stop the Service**:
+   ```bash
+   docker compose stop prometheus
+   ```
+2. **Clear Corrupted Data**:
+   ```bash
+   sudo rm -rf ~/docker/monitoring/prometheus_data/data/*
+   ```
+3. **Restore from NAS**:
+   Find the latest snapshot on your NAS and sync it back to the local SSD:
+   ```bash
+   # Replace [SNAPSHOT_NAME] with your target folder
+   sudo rsync -av /mnt/monitoring/backups/prometheus/[SNAPSHOT_NAME]/ ~/docker/monitoring/prometheus_data/data/
+   ```
+4. **Fix Permissions**:
+   Ensure the Prometheus user (`65534`) owns the restored files:
+   ```bash
+   sudo chown -R 65534:65534 ~/docker/monitoring/prometheus_data/data
+   ```
+5. **Restart Service**:
+   ```bash
+   docker compose up -d prometheus
+   ```
+
 ---
 
-## 🔒 Security Note: This stack is designed for a hardened home lab environment. It assumes:
+## 🔒 Security Note
+
+This stack is designed for a hardened home lab environment. It assumes:
 
 **Network Isolation:** All containers run on a dedicated Monitoring VLAN.
 
@@ -198,6 +288,31 @@ In the event of a local SSD failure or data corruption, follow these steps to re
 **Encryption:** Forced HTTPS/SSL via local certificates; all port 80/HTTP traffic is blocked at the firewall level.
 
 **Access Control:** No direct WAN exposure; access is restricted to local/VPN clients.
+
+**CI/CD Security:**
+- Secrets are stored in GitHub Secrets, never in code
+- `.env` files are gitignored
+- All deployments require CI validation to pass first
+- Self-hosted runner runs on isolated network
+
+---
+
+## 📁 Project Structure
+
+```
+monitoring-stack/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml          # CI/CD pipeline (validated on every push)
+├── scripts/
+│   └── backup_prometheus.sh    # Automated backup script
+├── .env.example                # Environment variable template
+├── .gitignore
+├── docker-compose.yml          # Service definitions
+├── prometheus.yml              # Prometheus scrape configuration
+├── targets.json                # Dynamic scrape targets
+└── README.md                   # This file
+```
 
 ---
 

@@ -1,35 +1,69 @@
 services:
   # Prometheus Service
   prometheus:
-    image: prom/prometheus:latest  # Official Prometheus Docker image
+    image: prom/prometheus:v2.51.0  # Official Prometheus Docker image
     container_name: prometheus  # Name of the container
     restart: unless-stopped  # Restart policy to ensure Prometheus is always running
+    user: "65534"  # Run as nobody user for security
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro  # Mount Prometheus configuration file
       - ./targets.json:/etc/prometheus/targets.json:ro  # Mount targets JSON file for dynamic target discovery
       - prometheus_data:/prometheus  # Volume to persist Prometheus data
+      - ./scripts/backup_prometheus.sh:/scripts/backup_prometheus.sh:ro  # Mount backup script
     ports:
       - "9090:9090"  # Expose Prometheus web UI on port 9090
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'  # Command to start Prometheus with the configuration file
+      - '--storage.tsdb.path=/prometheus'  # TSDB data path
+      - '--storage.tsdb.retention.time=30d'  # Retain metrics for 30 days
+      - '--web.enable-admin-api'  # Enable Admin API for backup snapshots
+      - '--web.enable-lifecycle'  # Enable lifecycle API for reload/stop
       - '--web.external-url=https://prometheus.${DOMAIN}'  # Set external URL for Prometheus web UI
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "1.0"
+        reservations:
+          memory: 512M
 
   # Loki Service
   loki:
-    image: grafana/loki:latest  # Official Loki Docker image
+    image: grafana/loki:3.4.0  # Official Loki Docker image
     container_name: loki  # Name of the container
     restart: unless-stopped  # Restart policy to ensure Loki is always running
     volumes:
       - loki_data:/loki  # Volume to persist Loki data
+      - ${NAS_LOG_PATH}:/var/log/grafana:rw  # Mount log directory for Grafana logs (NAS)
     ports:
       - "3100:3100"  # Expose Loki API on port 3100
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.5"
+        reservations:
+          memory: 256M
 
   # cAdvisor Service
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest  # Official cAdvisor Docker image
+    image: gcr.io/cadvisor/cadvisor:v0.49.1  # Official cAdvisor Docker image
     container_name: cadvisor  # Name of the container
     ports:
-      - "8081:8080"  # Expose cAdvisor web UI on port 8081
+      - "8080:8080"  # Internal port for Prometheus scraping
+      - "8081:8081"  # External port for web UI (host-level to avoid conflicts)
     volumes:
       - /:/rootfs:ro  # Mount root filesystem to monitor system metrics
       - /var/run:/var/run:ro  # Mount var/run for container metadata
@@ -39,10 +73,23 @@ services:
     devices:
       - /dev/kmsg  # Access kernel log messages
     restart: unless-stopped  # Restart policy to ensure cAdvisor is always running
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+        reservations:
+          memory: 128M
 
   # Grafana Service
   grafana:
-    image: grafana/grafana:latest  # Official Grafana Docker image
+    image: grafana/grafana:11.0.0  # Official Grafana Docker image
     container_name: grafana  # Name of the container
     restart: unless-stopped  # Restart policy to ensure Grafana is always running
     environment:
@@ -50,12 +97,56 @@ services:
       - GF_SERVER_ROOT_URL=https://grafana.${DOMAIN}/  # Set root URL for Grafana web UI
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}  # Set admin password using an environment variable
       - GF_AUTH_ANONYMOUS_ENABLED=false  # Disable anonymous access to Grafana
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
     volumes:
       - grafana_data:/var/lib/grafana  # Volume to persist Grafana data
       - ${NAS_LOG_PATH}:/var/log/grafana  # Mount log directory for Grafana logs
     ports:
       - "3000:3000"  # Expose Grafana web UI on port 3000
     user: "472"  # Run Grafana as a specific user (UID 472)
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.5"
+        reservations:
+          memory: 256M
+
+  # Node Exporter - for system-level metrics from all hosts
+  node-exporter:
+    image: prom/node-exporter:v1.7.0  # Official Node Exporter Docker image
+    container_name: node-exporter  # Name of the container
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro  # Process metrics
+      - /sys:/host/sys:ro  # System metrics
+      - /:/rootfs:ro  # Root filesystem
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "9100:9100"  # Expose Node Exporter on port 9100
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+        reservations:
+          memory: 32M
 
 volumes:
   prometheus_data:  # Volume for Prometheus data persistence
