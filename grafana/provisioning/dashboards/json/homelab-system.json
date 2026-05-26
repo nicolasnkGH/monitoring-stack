@@ -1,0 +1,154 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "thresholdsStyle": { "mode": "off" } },
+          "thresholds": { "mode": "absolute", "steps": [] },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" }, "legendCalcs": ["lastNotNull", "max"] },
+      "targets": [
+        { "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{job=\"hypervisors\",mode=\"idle\"}[5m])) * 100)", "legendFormat": "{{instance}} CPU", "refId": "A" },
+        { "expr": "avg by(instance) (rate(node_cpu_seconds_total{job=\"hypervisors\",mode=\"iowait\"}[5m])) * 100", "legendFormat": "{{instance}} IO-wait", "refId": "B" }
+      ],
+      "title": "CPU Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "thresholdsStyle": { "mode": "off" } },
+          "thresholds": { "mode": "absolute", "steps": [] },
+          "unit": "bytes"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Used" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Total" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "expr": "avg by(instance) (node_filesystem_avail_bytes{job=\"hypervisors\",mountpoint=\"/\"}) / 1024 / 1024 / 1024", "legendFormat": "{{instance}} Free GB", "refId": "A" },
+        { "expr": "avg by(instance) (node_filesystem_size_bytes{job=\"hypervisors\",mountpoint=\"/\"}) / 1024 / 1024 / 1024", "legendFormat": "{{instance}} Total GB", "refId": "B" }
+      ],
+      "title": "Disk Space (Root)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "thresholdsStyle": { "mode": "off" } },
+          "thresholds": { "mode": "absolute", "steps": [] },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "expr": "avg by(instance) (node_memory_MemTotal_bytes{job=\"hypervisors\"} - node_memory_MemAvailable_bytes{job=\"hypervisors\"})", "legendFormat": "{{instance}} Used", "refId": "A" },
+        { "expr": "avg by(instance) (node_memory_MemTotal_bytes{job=\"hypervisors\"})", "legendFormat": "{{instance}} Total", "refId": "B" }
+      ],
+      "title": "Memory Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "thresholdsStyle": { "mode": "off" } },
+          "thresholds": { "mode": "absolute", "steps": [] },
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "expr": "sum by(instance) (rate(node_network_receive_bytes_total{job=\"hypervisors\",device!=\"lo\"}[5m]))", "legendFormat": "{{instance}} Inbound", "refId": "A" },
+        { "expr": "sum by(instance) (rate(node_network_transmit_bytes_total{job=\"hypervisors\",device!=\"lo\"}[5m]))", "legendFormat": "{{instance}} Outbound", "refId": "B" }
+      ],
+      "title": "Network I/O",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 50 },
+            { "color": "red", "value": 80 }
+          ]},
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 5,
+      "options": { "displayMode": "gradient", "minVizWidth": 8, "minVizHeight": 16, "showUnfilled": true, "maxVizWidth": "auto", "maxVizHeight": "auto", "orientation": "horizontal" },
+      "targets": [
+        { "expr": "100 * (1 - avg by(instance) (node_filesystem_avail_bytes{job=\"hypervisors\",mountpoint=\"/\"}) / avg by(instance) (node_filesystem_size_bytes{job=\"hypervisors\",mountpoint=\"/\"}))", "legendFormat": "{{instance}} /", "refId": "A" },
+        { "expr": "100 * (1 - avg by(instance) (node_filesystem_avail_bytes{job=\"hypervisors\",mountpoint=\"/mnt\"}) / avg by(instance) (node_filesystem_size_bytes{job=\"hypervisors\",mountpoint=\"/mnt\"}))", "legendFormat": "{{instance}} /mnt", "refId": "B" }
+      ],
+      "title": "Disk Usage %",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 50 },
+            { "color": "red", "value": 80 }
+          ]},
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 6,
+      "options": { "displayMode": "gradient", "minVizWidth": 8, "minVizHeight": 16, "showUnfilled": true, "maxVizWidth": "auto", "maxVizHeight": "auto", "orientation": "horizontal" },
+      "targets": [
+        { "expr": "100 * (1 - avg by(instance) (node_memory_MemAvailable_bytes{job=\"hypervisors\"}) / avg by(instance) (node_memory_MemTotal_bytes{job=\"hypervisors\"}))", "legendFormat": "{{instance}} Used", "refId": "A" }
+      ],
+      "title": "Memory Usage %",
+      "type": "bargauge"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["homelab", "proxmox", "system"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": { "refresh_intervals": ["10s", "30s", "1m", "5m", "15m", "30m", "1h"] },
+  "title": "Homelab System Overview",
+  "uid": "homelab-system",
+  "version": 1
+}
