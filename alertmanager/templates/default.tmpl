@@ -1,0 +1,105 @@
+{{ define "slack.default.title" }}
+{{ .CommonLabels.alertname }}{{ if eq .Status "firing" }} 🔴{{ else }} 🟢{{ end }}
+{{ end }}
+
+{{ define "slack.default.text" }}
+{{ range .Alerts }}
+**Alert:** {{ .Labels.alertname }}
+**Severity:** {{ .Labels.severity }}
+**Service:** {{ .Labels.service }}
+**Instance:** {{ .Labels.instance }}
+**Summary:** {{ .Annotations.summary }}
+{{ if .Annotations.description }}**Description:** {{ .Annotations.description }}{{ end }}
+{{ if .Annotations.runbook_url }}**Runbook:** {{ .Annotations.runbook_url }}{{ end }}
+{{ end }}
+{{ end }}
+
+{{ define "slack.critical.title" }}
+🚨 {{ .CommonLabels.alertname }} — CRITICAL
+{{ end }}
+
+{{ define "slack.critical.text" }}
+{{ range .Alerts }}
+**CRITICAL ALERT**
+
+| Field | Value |
+|-------|-------|
+| Alert | {{ .Labels.alertname }} |
+| Instance | {{ .Labels.instance }} |
+| Service | {{ .Labels.service }} |
+| Severity | {{ .Labels.severity }} |
+
+**Summary:** {{ .Annotations.summary }}
+
+{{ if .Annotations.description }}**Description:** {{ .Annotations.description }}{{ end }}
+{{ if .Annotations.runbook_url }}**Runbook:** {{ .Annotations.runbook_url }}{{ end }}
+
+_Fired at: {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}_
+{{ end }}
+{{ end }}
+
+{{ define "slack.warning.title" }}
+⚠️ {{ .CommonLabels.alertname }}
+{{ end }}
+
+{{ define "slack.warning.text" }}
+{{ range .Alerts }}
+**Warning:** {{ .Labels.alertname }} on {{ .Labels.instance }}
+
+**Summary:** {{ .Annotations.summary }}
+{{ if .Annotations.description }}**Description:** {{ .Annotations.description }}{{ end }}
+
+_Fired at: {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}_
+{{ end }}
+{{ end }}
+
+{{ define "email.default.subject" }}
+[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} - {{ .CommonLabels.instance }}
+{{ end }}
+
+{{ define "email.default.html" }}
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+.alert { border-left: 4px solid #ccc; padding: 15px; margin: 10px 0; }
+.critical { border-left-color: #dc3545; background: #fff5f5; }
+.warning { border-left-color: #ffc107; background: #fffbf0; }
+.info { border-left-color: #17a2b8; background: #f0f9ff; }
+.resolved { border-left-color: #28a745; background: #f0fff4; }
+h2 { color: #333; }
+table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+th { background-color: #f2f2f2; }
+.runbook { color: #0066cc; text-decoration: none; }
+.status-firing { color: #dc3545; font-weight: bold; }
+.status-resolved { color: #28a745; font-weight: bold; }
+</style>
+</head>
+<body>
+<h2>home-observability Alert Notification</h2>
+{{ range .Alerts }}
+<div class="alert {{ if eq .Status "firing" }}{{ if eq .Labels.severity "critical" }}critical{{ else if eq .Labels.severity "warning" }}warning{{ else }}info{{ end }}{{ else }}resolved{{ end }}">
+<h3>{{ .Labels.alertname }}</h3>
+<table>
+<tr><th>Field</th><th>Value</th></tr>
+<tr><td>Status</td><td class="{{ if eq .Status "firing" }}status-firing{{ else }}status-resolved{{ end }}">{{ .Status | toUpper }}</td></tr>
+<tr><td>Severity</td><td>{{ .Labels.severity }}</td></tr>
+<tr><td>Alert</td><td>{{ .Labels.alertname }}</td></tr>
+<tr><td>Service</td><td>{{ .Labels.service }}</td></tr>
+<tr><td>Instance</td><td>{{ .Labels.instance }}</td></tr>
+{{ if .Labels.host }}<tr><td>Host</td><td>{{ .Labels.host }}</td></tr>{{ end }}
+<tr><td>Summary</td><td>{{ .Annotations.summary }}</td></tr>
+{{ if .Annotations.description }}<tr><td>Description</td><td>{{ .Annotations.description }}</td></tr>{{ end }}
+{{ if .Annotations.runbook_url }}<tr><td>Runbook</td><td><a href="{{ .Annotations.runbook_url }}" class="runbook">View Runbook</a></td></tr>{{ end }}
+<tr><td>Fired At</td><td>{{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}</td></tr>
+{{ if .EndsAt }}<tr><td>Resolved At</td><td>{{ .EndsAt.Format "2006-01-02 15:04:05 MST" }}</td></tr>{{ end }}
+</table>
+</div>
+{{ end }}
+<hr>
+<p style="color: #888; font-size: 12px;">Sent by home-observability Alertmanager | {{ now.Format "2006-01-02 15:04:05 MST" }}</p>
+</body>
+</html>
+{{ end }}

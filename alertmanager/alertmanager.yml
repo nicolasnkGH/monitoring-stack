@@ -1,0 +1,80 @@
+global:
+  resolve_timeout: 5m
+
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+route:
+  receiver: 'default-telegram'
+  group_by: ['alertname', 'cluster', 'service', 'instance']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: 'critical-telegram'
+      matchers:
+        - severity = critical
+      group_wait: 10s
+      repeat_interval: 1h
+
+    - receiver: 'warning-telegram'
+      matchers:
+        - severity = warning
+      group_wait: 1m
+      repeat_interval: 4h
+
+    - receiver: 'info-telegram'
+      matchers:
+        - severity = info
+      group_wait: 5m
+      repeat_interval: 12h
+
+inhibit_rules:
+  - source_matchers:
+      - alertname =~ "ProxmoxHostDown|ProxmoxNodeNotReady"
+    target_matchers:
+      - alertname =~ ".*"
+    equal: ['instance']
+
+  - source_matchers:
+      - alertname = "DiskIsFull"
+    target_matchers:
+      - alertname = "DiskSpaceRunningOut"
+    equal: ['instance', 'mountpoint']
+
+  - source_matchers:
+      - alertname =~ "OOMKiller|MemoryAvailableLow"
+    target_matchers:
+      - alertname = "HighMemoryUsage"
+    equal: ['instance']
+
+  - source_matchers:
+      - alertname = "GPUThermalShutdown"
+    target_matchers:
+      - alertname = "GPUTemperatureWarning"
+    equal: ['gpu_name']
+
+receivers:
+  - name: 'default-telegram'
+    telegram_configs:
+      - send_resolved: true
+        bot_token: '8753430317:AAFCELpiC-6MS0bpsQI-BpUrB_FiF3lLDTQ'
+        chat_id: 6227621086
+
+  - name: 'critical-telegram'
+    telegram_configs:
+      - send_resolved: true
+        bot_token: '8753430317:AAFCELpiC-6MS0bpsQI-BpUrB_FiF3lLDTQ'
+        chat_id: 6227621086
+
+  - name: 'warning-telegram'
+    telegram_configs:
+      - send_resolved: true
+        bot_token: '8753430317:AAFCELpiC-6MS0bpsQI-BpUrB_FiF3lLDTQ'
+        chat_id: 6227621086
+
+  - name: 'info-telegram'
+    telegram_configs:
+      - send_resolved: true
+        bot_token: '8753430317:AAFCELpiC-6MS0bpsQI-BpUrB_FiF3lLDTQ'
+        chat_id: 6227621086

@@ -1,0 +1,144 @@
+groups:
+  - name: proxmox_alerts
+    interval: 30s
+    rules:
+      # Proxmox node down
+      - alert: ProxmoxNodeDown
+        expr: up{job="hypervisors"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: infrastructure
+        annotations:
+          summary: "Proxmox node {{ $labels.instance }} is down"
+          description: "Node {{ $labels.instance }} has been unreachable for >2 minutes. Check SSH, power, and network."
+
+      # Proxmox high CPU
+      - alert: ProxmoxHighCPU
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{job="hypervisors",mode="idle"}[5m])) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Proxmox node {{ $labels.instance }} CPU high (>{{ $value | printf \"%.0f\"}}%)"
+          description: "Node {{ $labels.instance }} CPU usage is above 85% for 5 minutes."
+
+      # Proxmox high RAM
+      - alert: ProxmoxHighMemory
+        expr: (node_memory_MemTotal_bytes{job="hypervisors"} - node_memory_MemAvailable_bytes{job="hypervisors"}) / node_memory_MemTotal_bytes{job="hypervisors"} * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Proxmox node {{ $labels.instance }} memory high (>{{ $value | printf \"%.0f\"}}%)"
+          description: "Node {{ $labels.instance }} memory usage is above 90% for 5 minutes."
+
+      # Proxmox disk space critical
+      - alert: ProxmoxDiskSpaceCritical
+        expr: (node_filesystem_avail_bytes{job="hypervisors",mountpoint="/"} / node_filesystem_size_bytes{job="hypervisors",mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+          team: infrastructure
+        annotations:
+          summary: "Proxmox node {{ $labels.instance }} disk critically low ({{ $value | printf \"%.0f\"}}% free)"
+          description: "Root filesystem on {{ $labels.instance }} has less than 10% free space."
+
+      # Proxmox VM/container down (via cadvisor)
+      - alert: ContainerDown
+        expr: absent(container_last_seen{name=~"llm-server|immich|home-assistant|n8n|nextcloud|docker|nginxproxymanager|cloudflare-tunnel|technitiumdns|portainer|grafana|prometheus|loki"})
+        for: 5m
+        labels:
+          severity: critical
+          team: infrastructure
+        annotations:
+          summary: "Container {{ $labels.name }} is down"
+          description: "Container {{ $labels.name }} has stopped reporting metrics for >5 minutes."
+
+  - name: service_alerts
+    interval: 30s
+    rules:
+      # Any monitored service down
+      - alert: ServiceDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+          team: infrastructure
+        annotations:
+          summary: "Service {{ $labels.instance }} is down"
+          description: "{{ $labels.job }} at {{ $labels.instance }} has been unreachable for >5 minutes."
+
+      # AI stack GPU node down
+      - alert: AIGPUDown
+        expr: up{job="ai_stack"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: ai
+        annotations:
+          summary: "AI GPU node {{ $labels.instance }} is down"
+          description: "An RTX 3090 Ti node has been unreachable."
+
+      # DNS server down
+      - alert: DNSServerDown
+        expr: up{job="dns_servers"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "DNS server {{ $labels.instance }} is down"
+          description: "Technitium DNS at {{ $labels.instance }} is unreachable."
+
+  - name: storage_alerts
+    interval: 30s
+    rules:
+      # NAS disk space warning
+      - alert: NASDiskSpaceWarning
+        expr: (node_filesystem_avail_bytes{job="app_services",mountpoint=~"/mnt/.*"} / node_filesystem_size_bytes{job="app_services",mountpoint=~"/mnt/.*"}) * 100 < 20
+        for: 10m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "NAS disk {{ $labels.mountpoint }} getting full ({{ $value | printf \"%.0f\"}}% free)"
+          description: "NAS mount {{ $labels.mountpoint }} has less than 20% free space."
+
+      # NAS disk space critical
+      - alert: NASDiskSpaceCritical
+        expr: (node_filesystem_avail_bytes{job="app_services",mountpoint=~"/mnt/.*"} / node_filesystem_size_bytes{job="app_services",mountpoint=~"/mnt/.*"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+          team: infrastructure
+        annotations:
+          summary: "NAS disk {{ $labels.mountpoint }} critically full ({{ $value | printf \"%.0f\"}}% free)"
+          description: "NAS mount {{ $labels.mountpoint }} has less than 10% free space."
+
+  - name: cadvisor_alerts
+    interval: 30s
+    rules:
+      # Container high memory usage
+      - alert: ContainerHighMemory
+        expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Container {{ $labels.name }} memory high (>{{ $value | printf \"%.0f\"}}%)"
+          description: "Container {{ $labels.name }} is using >85% of its memory limit."
+
+      # Container high CPU
+      - alert: ContainerHighCPU
+        expr: rate(container_cpu_usage_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Container {{ $labels.name }} CPU high (>{{ $value | printf \"%.0f\"}}%)"
+          description: "Container {{ $labels.name }} CPU usage is above 80%."

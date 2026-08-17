@@ -519,7 +519,7 @@ jobs:
           done
 
           # Check required secrets
-          for secret in PI_HOST PI_USERNAME SSH_PRIVATE_KEY GRAFANA_PASSWORD; do
+          for secret in DEPLOY_HOST PI_USERNAME SSH_PRIVATE_KEY GRAFANA_PASSWORD; do
             if [ -z "${!secret}" ]; then
               echo "⚠️ Secret $secret is not set as GitHub secret"
             else
@@ -540,7 +540,7 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
 
           # Add remote host to known_hosts (bypass interactive prompt)
-          ssh-keyscan -H "${{ secrets.PI_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
           echo "✅ SSH key prepared, known_hosts updated"
 
       # ------------------------------------------------------------------
@@ -553,7 +553,7 @@ jobs:
           
           # Set environment variables
           DOMAIN="${{ vars.DOMAIN }}"
-          PI_HOST="${{ secrets.PI_HOST }}"
+          DEPLOY_HOST="${{ secrets.DEPLOY_HOST }}"
           PI_USER="${{ secrets.PI_USERNAME }}"
           GRAFANA_PASSWORD="${{ secrets.GRAFANA_PASSWORD }}"
           NAS_LOG_PATH="${{ vars.NAS_LOG_PATH }}"
@@ -567,13 +567,13 @@ jobs:
 
           # Copy files to Pi using SCP (preserve directories)
           echo "Copying files to Pi..."
-          ssh "${PI_USER}@${PI_HOST}" "mkdir -p ~/docker/monitoring/{configs,scripts,data}" 2>/dev/null || true
-          scp -r ./* "${PI_USER}@${PI_HOST}:~/docker/monitoring/"
+          ssh "${PI_USER}@${DEPLOY_HOST}" "mkdir -p ~/docker/monitoring/{configs,scripts,data}" 2>/dev/null || true
+          scp -r ./* "${PI_USER}@${DEPLOY_HOST}:~/docker/monitoring/"
           echo "✅ Files synced to Pi"
 
           # Remote deployment commands
           echo "Starting remote deployment..."
-          ssh -t "${PI_USER}@${PI_HOST}" << 'REMOTE_SCRIPT'
+          ssh -t "${PI_USER}@${DEPLOY_HOST}" << 'REMOTE_SCRIPT'
             cd ~/docker/monitoring
             
             # Create data directories if they don't exist
@@ -612,7 +612,7 @@ jobs:
         run: |
           echo "=== Post-deploy Health Check ==="
           
-          PI_HOST="${{ secrets.PI_HOST }}"
+          DEPLOY_HOST="${{ secrets.DEPLOY_HOST }}"
           PI_USER="${{ secrets.PI_USERNAME }}"
           
           # Check services via SSH
@@ -620,7 +620,7 @@ jobs:
           
           for service_port in "grafana:3000" "prometheus:9090" "cadvisor:8081" "loki:3100"; do
             echo "Checking ${service_port}..."
-            result=$(ssh -o ConnectTimeout=5 "${PI_USER}@${PI_HOST}" \
+            result=$(ssh -o ConnectTimeout=5 "${PI_USER}@${DEPLOY_HOST}" \
               "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:${service_port#*:}" 2>/dev/null || echo "000")
             case "$result" in
               200|301|302|401|403)
@@ -634,7 +634,7 @@ jobs:
           done
 
           # Check for unhealthy containers
-          UNHEALTHY=$(ssh "${PI_USER}@${PI_HOST}" \
+          UNHEALTHY=$(ssh "${PI_USER}@${DEPLOY_HOST}" \
             "docker ps --filter 'health=unhealthy' --format '{{.Names}}'" 2>/dev/null | wc -l || echo "0")
           if [ "$UNHEALTHY" -gt 0 ]; then
             echo "❌ $UNHEALTHY unhealthy containers detected"

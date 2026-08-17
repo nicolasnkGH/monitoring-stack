@@ -1,0 +1,497 @@
+# Prometheus Alert Rules — Infrastructure Monitoring
+# Industry best practices: clear severity, actionable annotations, grouped by category
+
+groups:
+  # ============================================================================
+  # PROXMOX HOST ALERTS
+  # ============================================================================
+  - name: proxmox-host-alerts
+    rules:
+      # Proxmox host is unreachable (up == 0 for 2 minutes)
+      - alert: ProxmoxHostDown
+        expr: up{job="node", instance=~"10\\.27\\.27\\.[0-9]+"} == 0 for 2m
+        labels:
+          severity: critical
+          service: infrastructure
+          category: host
+        annotations:
+          summary: "Proxmox host {{ $labels.instance }} is unreachable"
+          description: "Node exporter on {{ $labels.instance }} ({{ $labels.host }}) has been unreachable for >2 minutes. This Proxmox hypervisor may be down, network-isolated, or unresponsive."
+          runbook_url: "https://github.com/nicolasnkGH/home-observability/wiki/Runbooks#proxmox-host-down"
+
+      # Proxmox node not ready (cluster node status)
+      - alert: ProxmoxNodeNotReady
+        expr: proxmox_node_status{status="online"} == 0 for 5m
+        labels:
+          severity: critical
+          service: proxmox
+          category: cluster
+        annotations:
+          summary: "Proxmox node {{ $labels.node }} is not ready"
+          description: "Node {{ $labels.node }} in cluster {{ $labels.cluster }} reports status offline/unreachable."
+
+  # ============================================================================
+  # CPU ALERTS
+  # ============================================================================
+  - name: cpu-alerts
+    rules:
+      # High CPU usage (>90% for 10 minutes)
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90 for 10m
+        labels:
+          severity: warning
+          service: infrastructure
+          category: cpu
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage on {{ $labels.instance }} ({{ $labels.host }}) is above 90% for 10 minutes. Current value: {{ $value | printf \"%.1f\" }}%"
+          runbook_url: "https://github.com/nicolasnkGH/home-observability/wiki/Runbooks#high-cpu-usage"
+
+      # CPU saturation (average wait time high)
+      - alert: CPUHighIOWait
+        expr: avg by(instance) (rate(node_cpu_seconds_total{mode="iowait"}[5m])) * 100 > 20 for 10m
+        labels:
+          severity: warning
+          service: infrastructure
+          category: cpu
+        annotations:
+          summary: "High I/O wait on {{ $labels.instance }}"
+          description: "I/O wait on {{ $labels.instance }} is {{ $value | printf \"%.1f\" }}%. Disk may be a bottleneck."
+
+  # ============================================================================
+  # MEMORY ALERTS
+  # ============================================================================
+  - name: memory-alerts
+    rules:
+      # High memory usage (>85% for 10 minutes)
+      - alert: HighMemoryUsage
+        expr: >
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+          for 10m
+        labels:
+          severity: warning
+          service: infrastructure
+          category: memory
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage on {{ $labels.instance }} ({{ $labels.host }}) is above 85%. Available: {{ humanize $value }}%"
+          runbook_url: "https://github.com/nicolasnkGH/home-observability/wiki/Runbooks#high-memory-usage"
+
+      # Critical memory — only 10% available
+      - alert: MemoryAvailableLow
+        expr: >
+          (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 10
+          for 5m
+        labels:
+          severity: critical
+          service: infrastructure
+          category: memory
+        annotations:
+          summary: "Critical memory on {{ $labels.instance }}"
+          description: "Only {{ $value | printf \"%.1f\" }}% memory available on {{ $labels.instance }}. System may OOM soon."
+
+      # OOM killer has been triggered (kernel log pattern)
+      - alert: OOMKiller
+        expr: increase(node_vmstat_oom_pages_count[5m]) > 0
+        labels:
+          severity: critical
+          service: infrastructure
+          category: memory
+        annotations:
+          summary: "OOM killer triggered on {{ $labels.instance }}"
+          description: "The OOM killer has been activated on {{ $labels.instance }}. A process was killed due to memory exhaustion."
+
+  # ============================================================================
+  # DISK ALERTS
+  # ============================================================================
+  - name: disk-alerts
+    rules:
+      # Disk space critically low (<5% free)
+      - alert: DiskIsFull
+        expr: >
+          (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) * 100 > 95
+          for 5m
+        labels:
+          severity: critical
+          service: infrastructure
+          category: disk
+        annotations:
+          summary: "Disk full on {{ $labels.instance }} {{ $labels.mountpoint }}"
+          description: "Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is {{ $value | printf \"%.1f\" }}% full. Only {{ humanize $value }}% free."
+          runbook_url: "https://github.com/nicolasnkGH/home-observability/wiki/Runbooks#disk-full"
+
+      # Disk space running low (<15% free)
+      - alert: DiskSpaceRunningOut
+        expr: >
+          (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) * 100 > 85
+          for 15m
+        labels:
+          severity: warning
+          service: infrastructure
+          category: disk
+        annotations:
+          summary: "Disk space low on {{ $labels.instance }} {{ $labels.mountpoint }}"
+          description: "Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is {{ $value | printf \"%.1f\" }}% full."
+
+      # Disk high I/O utilization (>80% await time)
+      - alert: DiskHighIOUtilization
+        expr: >
+          rate(node_disk_io_time_seconds_total[5m]) / rate(node_disk_reads_completed_total[5m] + node_disk_writes_completed_total[5m]) > 0.8
+          for 10m
+        labels:
+          severity: warning
+          service: infrastructure
+          category: disk
+        annotations:
+          summary: "High disk I/O on {{ $labels.instance }} {{ $labels.device }}"
+          description: "Disk {{ $labels.device }} on {{ $labels.instance }} has high I/O utilization."
+
+      # Filesystem read-only
+      - alert: FilesystemReadOnly
+        expr: node_filesystem_readonly == 1
+        labels:
+          severity: critical
+          service: infrastructure
+          category: disk
+        annotations:
+          summary: "Filesystem read-only on {{ $labels.instance }} {{ $labels.mountpoint }}"
+          description: "Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is in read-only mode. Possible filesystem corruption."
+
+  # ============================================================================
+  # NETWORK ALERTS
+  # ============================================================================
+  - name: network-alerts
+    rules:
+      # Network interface receiving abnormal traffic (>1 Gbps)
+      - alert: HighNetworkIngress
+        expr: >
+          rate(node_network_receive_bytes_total{device!~"lo|veth.*|br-.*|docker.*"}[5m]) * 8 > 1e9
+          for 5m
+        labels:
+          severity: warning
+          service: infrastructure
+          category: network
+        annotations:
+          summary: "High network ingress on {{ $labels.instance }} {{ $labels.device }}"
+          description: "Network interface {{ $labels.device }} on {{ $labels.instance }} is receiving {{ humanize $value }} bps."
+
+      # Network interface transmitting abnormal traffic
+      - alert: HighNetworkEgress
+        expr: >
+          rate(node_network_transmit_bytes_total{device!~"lo|veth.*|br-.*|docker.*"}[5m]) * 8 > 1e9
+          for 5m
+        labels:
+          severity: warning
+          service: infrastructure
+          category: network
+        annotations:
+          summary: "High network egress on {{ $labels.instance }} {{ $labels.device }}"
+          description: "Network interface {{ $labels.device }} on {{ $labels.instance }} is transmitting {{ humanize $value }} bps."
+
+      # Network interface errors
+      - alert: NetworkInterfaceErrors
+        expr: rate(node_network_receive_errs_total[5m]) + rate(node_network_transmit_errs_total[5m]) > 10
+        labels:
+          severity: warning
+          service: infrastructure
+          category: network
+        annotations:
+          summary: "Network errors on {{ $labels.instance }} {{ $labels.device }}"
+          description: "Network interface {{ $labels.device }} on {{ $labels.instance }} has {{ $value | printf \"%.1f\" }} errors/sec."
+
+      # Network interface drops
+      - alert: NetworkInterfaceDrops
+        expr: rate(node_network_receive_drop_total[5m]) + rate(node_network_transmit_drop_total[5m]) > 10
+        labels:
+          severity: warning
+          service: infrastructure
+          category: network
+        annotations:
+          summary: "Network drops on {{ $labels.instance }} {{ $labels.device }}"
+          description: "Network interface {{ $labels.device }} on {{ $labels.instance }} has {{ $value | printf \"%.1f\" }} drops/sec."
+
+  # ============================================================================
+  # GPU ALERTS (RTX 3090 Ti — AI Stack)
+  # ============================================================================
+  - name: gpu-alerts
+    rules:
+      # GPU temperature warning (>75°C)
+      - alert: GPUTemperatureWarning
+        expr: nvidia_gpu_temperature_celsius > 75
+        labels:
+          severity: warning
+          service: ai-stack
+          category: gpu
+        annotations:
+          summary: "GPU temperature warning on {{ $labels.instance }}"
+          description: "GPU {{ $labels.gpu_name }} on {{ $labels.instance }} is at {{ $value | printf \"%.1f\" }}°C (threshold: 75°C)."
+
+      # GPU temperature critical (>85°C)
+      - alert: GPUTemperatureCritical
+        expr: node_hwmon_temp_celsius{chip="nvidia_pci"} > 85
+        labels:
+          severity: critical
+          service: ai-stack
+          category: gpu
+        annotations:
+          summary: "GPU temperature critical on {{ $labels.instance }}"
+          description: "GPU {{ $labels.gpu_name }} on {{ $labels.instance }} is at {{ $value | printf \"%.1f\" }}°C (threshold: 85°C). Risk of thermal throttling."
+          runbook_url: "https://github.com/nicolasnkGH/home-observability/wiki/Runbooks#gpu-overheating"
+
+      # GPU thermal shutdown imminent (>90°C)
+      - alert: GPUThermalShutdown
+        expr: node_hwmon_temp_celsius{chip="nvidia_pci"} > 90
+        labels:
+          severity: critical
+          service: ai-stack
+          category: gpu
+        annotations:
+          summary: "GPU thermal shutdown risk on {{ $labels.instance }}"
+          description: "GPU {{ $labels.gpu_name }} on {{ $labels.instance }} is at {{ $value | printf \"%.1f\" }}°C. Automatic thermal shutdown imminent at 93°C."
+
+      # GPU memory usage >90%
+      - alert: GPUMemoryHigh
+        expr: >
+          (nvidia_gpu_memory_total_bytes - nvidia_gpu_memory_free_bytes) / nvidia_gpu_memory_total_bytes * 100 > 90
+          for 10m
+        labels:
+          severity: warning
+          service: ai-stack
+          category: gpu
+        annotations:
+          summary: "GPU memory high on {{ $labels.instance }}"
+          description: "GPU {{ $labels.gpu_name }} memory usage is {{ $value | printf \"%.1f\" }}%."
+
+      # GPU utilization low for extended period (model may be unloaded)
+      - alert: GPULowUtilization
+        expr: nvidia_gpu_utilization_percent < 5 for 30m
+        labels:
+          severity: info
+          service: ai-stack
+          category: gpu
+        annotations:
+          summary: "GPU low utilization on {{ $labels.instance }}"
+          description: "GPU {{ $labels.gpu_name }} has been idle (<5% utilization) for 30 minutes. Model may be unloaded."
+
+      # GPU ECC errors
+      - alert: GPUECCError
+        expr: increase(nvidia_gpu_ecc_multi_bit_dgc_errors_total[5m]) > 0
+        labels:
+          severity: critical
+          service: ai-stack
+          category: gpu
+        annotations:
+          summary: "GPU ECC error on {{ $labels.instance }}"
+          description: "GPU {{ $labels.gpu_name }} on {{ $labels.instance }} reports ECC errors. Possible hardware degradation."
+
+  # ============================================================================
+  # SSL/TLS CERTIFICATE ALERTS
+  # ============================================================================
+  - name: ssl-alerts
+    rules:
+      # SSL certificate expiring within 30 days
+      - alert: SSLCertificateExpiring
+        expr: >
+          (ssl_cert_expiry_date - time()) / 86400 < 30
+          and
+          (ssl_cert_expiry_date - time()) / 86400 > 7
+        labels:
+          severity: warning
+          service: infrastructure
+          category: ssl
+        annotations:
+          summary: "SSL certificate expiring for {{ $labels.instance }}"
+          description: "SSL certificate for {{ $labels.instance }} expires in {{ (ssl_cert_expiry_date - time()) / 86400 | printf \"%.0f\" }} days."
+
+      # SSL certificate expiring within 7 days (critical)
+      - alert: SSLCertificateCritical
+        expr: >
+          (ssl_cert_expiry_date - time()) / 86400 <= 7
+        labels:
+          severity: critical
+          service: infrastructure
+          category: ssl
+        annotations:
+          summary: "SSL certificate critically expiring for {{ $labels.instance }}"
+          description: "SSL certificate for {{ $labels.instance }} expires in {{ (ssl_cert_expiry_date - time()) / 86400 | printf \"%.0f\" }} days."
+
+  # ============================================================================
+  # CONTAINER ALERTS (cAdvisor)
+  # ============================================================================
+  - name: container-alerts
+    rules:
+      # Container restarting frequently (>5 restarts in 15 minutes)
+      - alert: ContainerRestarts
+        expr: increase(container_restart_count[15m]) > 5
+        labels:
+          severity: warning
+          service: containers
+          category: container
+        annotations:
+          summary: "Container {{ $labels.name }} restarting frequently on {{ $labels.instance }}"
+          description: "Container {{ $labels.name }} has restarted {{ humanize $value }} times in 15 minutes."
+          runbook_url: "https://github.com/nicolasnkGH/home-observability/wiki/Runbooks#container-restart-loop"
+
+      # Container using excessive memory (>4GB for 10 minutes)
+      - alert: ContainerMemoryHigh
+        expr: >
+          container_memory_usage_bytes{name=~".*"} / 1024 / 1024 / 1024 > 4
+          for 10m
+        labels:
+          severity: warning
+          service: containers
+          category: container
+        annotations:
+          summary: "Container {{ $labels.name }} using high memory on {{ $labels.instance }}"
+          description: "Container {{ $labels.name }} is using {{ humanize $value }} GB memory."
+
+      # Container CPU throttling
+      - alert: ContainerCPUBeingThrottled
+        expr: rate(container_cpu_throttled_seconds_total[5m]) > 1
+        labels:
+          severity: warning
+          service: containers
+          category: container
+        annotations:
+          summary: "Container {{ $labels.name }} CPU throttled on {{ $labels.instance }}"
+          description: "Container {{ $labels.name }} is experiencing CPU throttling."
+
+  # ============================================================================
+  # SERVICE AVAILABILITY ALERTS
+  # ============================================================================
+  - name: service-availability-alerts
+    rules:
+      # Service endpoint down (HTTP check fails)
+      - alert: ServiceEndpointDown
+        expr: probe_success == 0 for 1m
+        labels:
+          severity: critical
+          service: "{{ $labels.service }}"
+          category: availability
+        annotations:
+          summary: "Service {{ $labels.service }} is down"
+          description: "Endpoint {{ $labels.instance }} (service: {{ $labels.service }}) has been unreachable for >1 minute."
+          runbook_url: "https://github.com/nicolasnkGH/home-observability/wiki/Runbooks#service-down"
+
+      # Service high response time (>2s for 5 minutes)
+      - alert: ServiceHighResponseTime
+        expr: probe_duration_seconds > 2 for 5m
+        labels:
+          severity: warning
+          service: "{{ $labels.service }}"
+          category: availability
+        annotations:
+          summary: "Slow response from {{ $labels.service }}"
+          description: "Service {{ $labels.service }} at {{ $labels.instance }} has response time {{ $value | printf \"%.2f\" }}s."
+
+      # Service SSL probe failure
+      - alert: ServiceSSLProbeFailed
+        expr: probe_ssl_remaining_days < 7
+        labels:
+          severity: warning
+          service: "{{ $labels.service }}"
+          category: ssl
+        annotations:
+          summary: "SSL issue for {{ $labels.service }}"
+          description: "SSL certificate for {{ $labels.service }} has {{ $value | printf \"%.0f\" }} days remaining."
+
+  # ============================================================================
+  # SYSTEM HEALTH ALERTS
+  # ============================================================================
+  - name: system-health-alerts
+    rules:
+      # System uptime < 5 minutes (recently rebooted)
+      - alert: SystemRecentlyRebooted
+        expr: node_time_seconds - node_boot_time_seconds < 300
+        for: 2m
+        labels:
+          severity: info
+          service: infrastructure
+          category: system
+        annotations:
+          summary: "System recently rebooted on {{ $labels.instance }}"
+          description: "{{ $labels.host }} was rebooted less than 5 minutes ago."
+
+      # System load average > 2x CPU cores for 10 minutes
+      - alert: HighLoadAverage
+        expr: >
+          node_load1 / count without(cpu, mode) (node_cpu_seconds_total{mode="idle"}) > 2
+          for 10m
+        labels:
+          severity: warning
+          service: infrastructure
+          category: system
+        annotations:
+          summary: "High load average on {{ $labels.instance }}"
+          description: "Load average on {{ $labels.instance }} is {{ $value | printf \"%.1f\" }}x the number of CPU cores."
+
+      # Filesystem inode exhaustion (<10% free)
+      - alert: InodeExhaustion
+        expr: >
+          (1 - (node_filesystem_files_free / node_filesystem_files)) * 100 > 90
+          for 10m
+        labels:
+          severity: warning
+          service: infrastructure
+          category: disk
+        annotations:
+          summary: "Inode exhaustion on {{ $labels.instance }} {{ $labels.mountpoint }}"
+          description: "Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is {{ $value | printf \"%.1f\" }}% inode-full."
+
+  # ============================================================================
+  # PROXMOX-SPECIFIC ALERTS
+  # ============================================================================
+  - name: proxmox-specific-alerts
+    rules:
+      # ZFS pool degraded
+      - alert: ZFSPoolDegraded
+        expr: proxmox_zfs_pool_health{status!="online"} == 1
+        labels:
+          severity: critical
+          service: proxmox
+          category: storage
+        annotations:
+          summary: "ZFS pool degraded on {{ $labels.instance }}"
+          description: "ZFS pool {{ $labels.pool }} on {{ $labels.instance }} is in {{ $labels.status }} state."
+
+      # VM/container disk image error
+      - alert: ProxmoxDiskError
+        expr: proxmox_disk_errors_total > 0
+        labels:
+          severity: warning
+          service: proxmox
+          category: storage
+        annotations:
+          summary: "Disk error on {{ $labels.instance }}"
+          description: "Disk errors detected on {{ $labels.instance }} for VM/container {{ $labels.vm_id }}."
+
+  # ============================================================================
+  # RECORDING RULES (pre-computed aggregations for performance)
+  # ============================================================================
+  - name: recording-rules
+    rules:
+      # Average CPU usage by instance (5-minute window)
+      - record: instance:cpu_usage:avg_rate5m
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+      # Average memory usage by instance
+      - record: instance:memory_usage:percent
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+
+      # Average disk usage by instance and mountpoint
+      - record: instance_mountpoint:disk_usage:percent
+        expr: (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) * 100
+
+      # Service availability by service name
+      - record: service:availability:percent
+        expr: avg by(service) (probe_success) * 100
+
+      # Infrastructure health score (0-100, weighted)
+      - record: infrastructure:health_score:weighted
+        expr: >
+          (
+            (100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])))) * 0.25 +
+            (100 * (1 - avg(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))) * 0.25 +
+            (100 * (1 - avg by(instance) (rate(node_disk_io_time_seconds_total[5m])))) * 0.2 +
+            (avg(probe_success) * 100) * 0.3
+          )

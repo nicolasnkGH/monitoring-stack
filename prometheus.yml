@@ -2,17 +2,98 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - '/etc/prometheus/rules/*.yml'
+
 scrape_configs:
-- job_name: 'monitoring_pi'
-  static_configs:
-  - targets: ['localhost:9090']
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
 
-- job_name: 'cadvisor'
-  static_configs:
-  - targets: ['cadvisor:8080']
+  # Container metrics (cAdvisor)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
 
-- job_name: 'proxmox_nodes'
-  file_sd_configs:
-  - files:
-    - '/etc/prometheus/targets.json'
-    refresh_interval: 1m
+  # Hypervisors — Proxmox nodes (example)
+  - job_name: 'hypervisors'
+    file_sd_configs:
+      - files:
+          - '/etc/prometheus/targets.json'
+        refresh_interval: 1m
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: 'pve[0-9]\.example\.com:9100'
+        action: keep
+
+  # AI Stack — GPU inference nodes
+  - job_name: 'ai_stack'
+    file_sd_configs:
+      - files:
+          - '/etc/prometheus/targets.json'
+        refresh_interval: 1m
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: 'ai[0-9]\.example\.com:9100'
+        action: keep
+
+  # App & Services
+  - job_name: 'app_services'
+    file_sd_configs:
+      - files:
+          - '/etc/prometheus/targets.json'
+        refresh_interval: 1m
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '.*\.example\.com:9100'
+        action: keep
+
+  # NVIDIA GPU metrics — DCGM exporter
+  - job_name: 'nvidia_gpu'
+    static_configs:
+      - targets: ['ai1.example.com:9835']
+        labels:
+          gpu: "rtx3090ti"
+          instance: "gpu-node-1"
+
+  # AMD GPU metrics — textfile collector via Node Exporter
+  - job_name: 'amd_gpu'
+    file_sd_configs:
+      - files:
+          - '/etc/prometheus/targets.json'
+        refresh_interval: 1m
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: 'ai2\.example\.com:9100'
+        action: keep
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'amdgpu_.*'
+        action: keep
+
+  # Blackbox probes — service availability checks
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - 'dns.example.com'
+          - 'pve1.example.com'
+          - 'ai1.example.com'
+          - 'monitoring.example.com'
+        labels:
+          service: infrastructure
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 'blackbox-exporter:9115'

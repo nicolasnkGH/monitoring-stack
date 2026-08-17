@@ -118,11 +118,23 @@ To set up the runner, follow the [GitHub Actions self-hosted runner documentatio
 
 | Service | Image | Port | Purpose |
 |---------|-------|------|---------|
-| **Prometheus** | `prom/prometheus:v2.51.0` | 9090 | Time-series metrics collection |
-| **Grafana** | `grafana/grafana:11.0.0` | 3000 | Dashboards and visualization |
-| **Loki** | `grafana/loki:3.4.0` | 3100 | Log aggregation |
-| **cAdvisor** | `gcr.io/cadvisor/cadvisor:v0.49.1` | 8080/8081 | Container resource usage |
-| **Node Exporter** | `prom/node-exporter:v1.7.0` | 9100 | Host-level hardware metrics |
+|| **Prometheus** | `prom/prometheus:latest` | 9090 | Time-series metrics collection |
+|| **Grafana** | `grafana/grafana:latest` | 3000 | Dashboards and visualization |
+|| **Loki** | `grafana/loki:latest` | 3100 | Log aggregation |
+|| **cAdvisor** | `gcr.io/cadvisor/cadvisor:latest` | 8080/8081 | Container resource usage |
+|| **Node Exporter** | `prom/node-exporter:latest` | 9100 | Host-level hardware metrics |
+|| **Alertmanager** | `prom/alertmanager:latest` | 9093 | Alert routing & notifications |
+|| **Blackbox Exporter** | `prom/blackbox-exporter:latest` | 9115 | HTTP/TCP/ICMP service probes |
+
+### Provisioned Dashboards
+
+| Dashboard | Description | GPU Support |
+|-----------|-------------|-------------|
+| **Infrastructure Overview** | CPU, memory, disk, network across all hosts | ❌ |
+| **GPU Monitoring** | Legacy NVIDIA node_exporter metrics | ✅ NVIDIA |
+| **AI Infrastructure Monitoring** | AI node health, GPU fleet, inference metrics | ✅ NVIDIA + AMD |
+| **AIOps Engine** | Alert analysis, LLM analysis rate & remediation | ❌ |
+| **Homelab System Overview** | Proxmox hypervisor-specific metrics | ❌ |
 
 ---
 
@@ -165,12 +177,27 @@ To ensure compatibility with an external **Nginx Proxy Manager (NPM)** VM, servi
 
 ## 🎯 Scrape Targets
 
-The stack currently monitors **27 endpoints** across the lab:
+The stack currently monitors **30+ endpoints** across the lab:
 
-* **Hypervisors**: 3x Proxmox Nodes
-* **AI Stack**: Dedicated AI node with **NVIDIA RTX 3090 Ti**
-* **Core Services**: Technitium DNS, Nginx Proxy Manager, Home Assistant
-* **Media Stack**: Plex, Sonarr, Radarr, qBittorrent, and more.
+| Category | Count | Details |
+|----------|-------|---------|
+| **Hypervisors** | 3 | Proxmox virtualization nodes |
+| **GPU Nodes** | 2 | NVIDIA RTX + AMD Radeon (DCGM + hwmon) |
+| **App Services** | 15+ | Containers, VMs, LXCs |
+| **DNS Servers** | 2 | Primary + secondary DNS |
+| **Blackbox Probes** | 5+ | HTTP/TCP availability checks |
+| **cAdvisor** | 1 | Container resource monitoring |
+
+### GPU Monitoring Architecture
+
+**NVIDIA GPUs** — Uses NVIDIA DCGM exporter (`nvcr.io/nvidia/k8s/dcgm-exporter`):
+- GPU utilization, memory usage, temperature, power draw, clock speeds
+- Dedicated `nvidia_gpu` Prometheus scrape job
+
+**AMD GPUs** — Lightweight hwmon textfile collector:
+- Busy %, VRAM used/total, temperature, power, fan speed, clocks
+- Collected via Node Exporter's `--collector.textfile.directory` with cron
+- Metrics named `amdgpu_*` (e.g., `amdgpu_temperature_celsius`)
 
 ### Adding New Targets
 
