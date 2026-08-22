@@ -1,0 +1,310 @@
+pages:
+  - name: Home
+    columns:
+      - size: full
+        widgets:
+          - type: search
+          - type: weather
+            location: Columbus, Ohio
+
+      - size: half
+        widgets:
+          - type: bookmarks
+            groups:
+              - title: AI Stack
+                links:
+                  - title: 9B - Hermes
+                    url: https://hermes9b.nick-t.net/sessions
+                  - title: Hermes 35B
+                    url: https://hermes35b.nick-t.net/sessions
+                  - title: open web ui
+                    url: https://ai.nick-t.net
+                    icon: si:openai
+                  - title: n8n
+                    url: https://n8n.nick-t.net
+                    icon: si:n8n
+
+              - title: Monitoring
+                links:
+                  - title: Grafana
+                    url: https://grafana.nick-t.net
+                    icon: si:grafana
+                  - title: Prometheus
+                    url: https://prometheus.nick-t.net/query
+                    icon: si:prometheus
+                  - title: cAdvisor
+                    url: https://cadvisor.nick-t.net/containers
+                  - title: Glance (this)
+                    url: http://10.27.27.106:8080
+
+      - size: half
+        widgets:
+          - type: bookmarks
+            groups:
+              - title: Servers
+                links:
+                  - title: Pve1
+                    url: https://10.27.27.77:8006
+                    icon: si:proxmox
+                  - title: Pve2
+                    url: https://10.27.27.88:8006
+                    icon: si:proxmox
+                  - title: Pve3
+                    url: https://pve3.nick-t.net
+                    icon: si:proxmox
+                  - title: pve4
+                    url: https://pve4.nick-t.net
+                    icon: si:proxmox
+                  - title: PBS
+                    url: https://pbs.nick-t.net
+                    icon: si:proxmox
+                  - title: Portainer
+                    url: https://portainer.nick-t.net/#!/auth
+                    icon: si:portainer
+                  - title: Home Assistant
+                    url: https://ha.nick-t.net
+                    icon: si:homeassistant
+                  - title: nginx proxy manager
+                    url: https://npm.nick-t.net
+                    icon: si:nginxproxymanager
+
+              - title: Networking
+                links:
+                  - title: Unifi
+                    url: https://network.unifi.ui.com
+                    icon: si:ubiquiti
+                  - title: .59 Technitium
+                    url: https://dns2.nick-t.net
+                  - title: Technitium-227
+                    url: https://dns.nick-t.net
+
+  - name: ARR Stack
+    columns:
+      - size: half
+        widgets:
+          - type: bookmarks
+            groups:
+              - title: Media Automation
+                links:
+                  - title: Overseerr
+                    url: https://overseer.nick-t.net/login
+                    icon: si:overseerr
+                  - title: Sonarr
+                    url: https://sonarr.nick-t.net
+                    icon: si:sonarr
+                  - title: Radarr
+                    url: https://radarr.nick-t.net
+                    icon: si:radarr
+                  - title: Lidarr
+                    url: https://lidarr.nick-t.net
+                    icon: si:lidarr
+                  - title: Readarr
+                    url: https://readarr.nick-t.net
+                    icon: si:readarr
+                  - title: Prowlarr
+                    url: https://prowlarr.nick-t.net
+                    icon: si:prowlarr
+                  - title: Bazarr
+                    url: https://bazarr.nick-t.net
+                    icon: si:bazarr
+                  - title: Jellyfin
+                    url: https://jelly.nick-t.net
+                    icon: si:jellyfin
+                  - title: Plex
+                    url: https://plex.nick-t.net
+                    icon: si:plex
+                  - title: Tautulli
+                    url: https://tautulli.nick-t.net
+                    icon: si:tautulli
+
+      - size: half
+        widgets:
+          - type: bookmarks
+            groups:
+              - title: Downloads
+                links:
+                  - title: qBittorrent
+                    url: https://torrent.nick-t.net
+                    icon: si:qbittorrent
+                  - title: Keep qBittorrent
+                    url: https://keeptorrent.nick-t.net
+                    icon: si:qbittorrent
+                  - title: slskd
+                    url: https://slskd.nick-t.net
+                  - title: Jackett
+                    url: https://jackett.nick-t.net
+                    icon: si:jackett
+                  - title: qBittorrent-nox
+                    url: https://qbt-nox.nick-t.net
+                    icon: si:qbittorrent
+
+  - name: Monitoring
+    columns:
+      - size: full
+        widgets:
+          - type: markdown
+            content: |
+              ## 📊 Infrastructure Health
+              Real-time metrics from Prometheus (scraped every 15s). Click any panel to open in Grafana.
+
+      - size: half
+        widgets:
+          - type: iframe
+            url: https://grafana.nick-t.net/d-solo/ai-infrastructure-monitoring/ai-infrastructure-monitoring?orgId=1&panelId=1&from=now-1h&to=now&refresh=30s
+            title: GPU Fleet Overview
+            height: 350
+          - type: iframe
+            url: https://grafana.nick-t.net/d-solo/per-node-detail/per-node-detail?orgId=1&var-host=All&panelId=1&from=now-1h&to=now&refresh=30s
+            title: CPU Usage (All Hosts)
+            height: 350
+
+      - size: half
+        widgets:
+          - type: iframe
+            url: https://grafana.nick-t.net/d-solo/ai-infrastructure-monitoring/ai-infrastructure-monitoring?orgId=1&panelId=2&from=now-1h&to=now&refresh=30s
+            title: NVIDIA RTX 3090 Ti
+            height: 350
+          - type: iframe
+            url: https://grafana.nick-t.net/d-solo/ai-infrastructure-monitoring/ai-infrastructure-monitoring?orgId=1&panelId=3&from=now-1h&to=now&refresh=30s
+            title: AMD RX 7800 XT
+            height: 350
+
+      - size: full
+        widgets:
+          - type: markdown
+            content: |
+              ## 🖥️ Per-Host Quick Status
+
+      - size: quarter
+        widgets:
+          - type: ping
+            host: 10.27.27.77
+            title: pve1
+            icon: si:proxmox
+          - type: ping
+            host: 10.27.27.88
+            title: pve2
+            icon: si:proxmox
+          - type: ping
+            host: 10.27.27.172
+            title: pve3
+            icon: si:proxmox
+          - type: ping
+            host: 10.27.27.38
+            title: pve4
+            icon: si:proxmox
+
+      - size: quarter
+        widgets:
+          - type: ping
+            host: 10.27.27.238
+            title: llm-server (RTX 3090)
+            icon: si:nvidia
+          - type: ping
+            host: 10.27.27.145
+            title: llm-server2 (RX 7800)
+            icon: si:amd
+          - type: ping
+            host: 10.27.27.29
+            title: hermes-agent
+            icon: si:heroku
+          - type: ping
+            host: 10.27.27.54
+            title: monitoring-pi
+            icon: si:raspberrypi
+
+      - size: quarter
+        widgets:
+          - type: ping
+            host: 10.27.27.106
+            title: homarr / glance
+            icon: si:homeassistant
+          - type: ping
+            host: 10.27.27.173
+            title: arr-stack
+            icon: si:sonarr
+          - type: ping
+            host: 10.27.27.59
+            title: dns-primary
+            icon: si:cloudflare
+          - type: ping
+            host: 10.27.27.227
+            title: dns-secondary
+            icon: si:cloudflare
+
+      - size: quarter
+        widgets:
+          - type: ping
+            host: 10.27.27.174
+            title: immich
+            icon: si:immich
+          - type: ping
+            host: 10.27.27.121
+            title: nextcloud
+            icon: si:nextcloud
+          - type: ping
+            host: 10.27.27.108
+            title: ha / omv
+            icon: si:homeassistant
+          - type: ping
+            host: 10.27.27.32
+            title: portainer
+            icon: si:portainer
+
+  - name: System
+    columns:
+      - size: half
+        widgets:
+          - type: markdown
+            content: |
+              ## 🛡️ Security & Access
+          - type: bookmarks
+            groups:
+              - title: Remote Access
+                links:
+                  - title: Guacamole (RDP/SSH)
+                    url: https://guacamole.nick-t.net
+                    icon: si:apacheguacamole
+                  - title: Tailscale Admin
+                    url: https://login.tailscale.com/admin
+                    icon: si:tailscale
+
+              - title: Identity
+                links:
+                  - title: Authentik
+                    url: https://auth.nick-t.net
+                    icon: si:auth0
+                  - title: Vaultwarden
+                    url: https://vault.nick-t.net
+                    icon: si:bitwarden
+
+      - size: half
+        widgets:
+          - type: markdown
+            content: |
+              ## 📦 Backup & Storage
+          - type: bookmarks
+            groups:
+              - title: Storage
+                links:
+                  - title: OMV (Primary NAS)
+                    url: https://omv.nick-t.net
+                    icon: si:openmediavault
+                  - title: OMV2 (Secondary)
+                    url: https://omv2.nick-t.net
+                    icon: si:openmediavault
+                  - title: PBS (Proxmox Backup)
+                    url: https://pbs.nick-t.net
+                    icon: si:proxmox
+                  - title: Nextcloud AIO Config
+                    url: https://aio-nc.nick-t.net/login
+                    icon: si:nextcloud
+
+              - title: Photos & Media
+                links:
+                  - title: Immich
+                    url: https://immich.nick-t.net
+                    icon: si:immich
+                  - title: Nextcloud
+                    url: https://nextcloud.nick-t.net/login
+                    icon: si:nextcloud
