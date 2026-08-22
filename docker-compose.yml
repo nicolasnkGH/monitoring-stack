@@ -13,7 +13,7 @@ services:
     volumes:
       - ./alertmanager/blackbox.yml:/config/blackbox.yml:ro
 
-  # Alertmanager
+  # Alertmanager — Alert deduplication and routing
   alertmanager:
     image: prom/alertmanager:latest
     container_name: alertmanager
@@ -184,6 +184,26 @@ services:
           cpus: "0.25"
         reservations:
           memory: 32M
+
+  # Grafana MCP Server — LLM-powered observability queries
+  mcp-grafana:
+    image: grafana/mcp-grafana:latest
+    container_name: mcp-grafana
+    restart: unless-stopped
+    networks:
+      - monitoring
+    environment:
+      - GRAFANA_URL=http://grafana:3000
+      - GRAFANA_SERVICE_ACCOUNT_TOKEN=${GRAFANA_MCP_TOKEN}
+      - MCP_GRAFANA_SERVER_TOKEN=${GRAFANA_MCP_TOKEN}
+    ports:
+      - "8000:8000"
+    command:
+      - '-t'
+      - 'sse'
+      - '--metrics'
+    depends_on:
+      - grafana
 
 volumes:
   prometheus_data:

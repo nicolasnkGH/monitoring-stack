@@ -1,326 +1,301 @@
 # 📊 Monitoring Stack
 
-A production-grade observability suite deployed via **GitHub Actions** to a **Raspberry Pi 4 8GB RAM**. This stack provides a "Single Pane of Glass" for monitoring a distributed home lab infrastructure, AI workloads (RTX 3090 Ti), and 20+ containerized applications.
+> A **production-grade, self-hosted observability platform** that monitors 39+ infrastructure targets across a distributed homelab, featuring **AI-powered alert response**, **GPU fleet monitoring** (NVIDIA RTX 3090 Ti + AMD RX 7800 XT), and an **LLM-driven AIOps agent** for automated incident investigation and remediation.
 
-> [!NOTE]
-> This is an open-source template. Your private secrets and credentials are managed via GitHub Secrets — never commit `.env` files.
+[![CI/CD](https://github.com/nicolasnkGH/monitoring-stack/actions/workflows/deploy.yml/badge.svg)](https://github.com/nicolasnkGH/monitoring-stack/actions/workflows/deploy.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
 
-## 🏗️ Architecture Overview
+## ✨ Highlights
 
-This monitoring stack utilizes a **Hybrid Storage Strategy** to balance high-performance metric ingestion with long-term data resilience.
+| Capability | What it means |
+|------------|---------------|
+| **39 Prometheus targets** | Distributed monitoring across Proxmox hypervisors, LXCs, Docker containers, AI nodes, network services |
+| **NVIDIA + AMD GPU monitoring** | DCGM exporter for RTX 3090 Ti, hwmon textfile collector for RX 7800 XT — real-time GPU temp, power, VRAM, utilization |
+| **6 Grafana dashboards** | Infrastructure overview, per-node drill-down, AI infra, GPU monitoring, AIOps engine, system overview |
+| **Grafana Alerting + Telegram** | 5 critical alert rules (host down, disk >92%, GPU overheat, AI service down, memory) delivered to Telegram |
+| **LLM AIOps Agent** | Qwen-9B investigates every critical alert via MCP: queries Prometheus metrics, diagnoses root cause, SSH-remediates, reports via Telegram |
+| **Grafana MCP Server** | Official `grafana/mcp-grafana` exposing 50+ MCP tools — your LLM can query any metric, manage dashboards or alert rules programmatically |
+| **Blackbox probes** | HTTP/TCP/ICMP health checks for external services |
+| **CI/CD pipeline** | 12-stage validation + SSH deployment with health checks and rollback |
+| **Automated backups** | Nightly Prometheus snapshots to NAS with 7-day retention |
+| **Cost: $0/run** | All inference runs on local GPUs (Qwen-9B, free); cloud fallback only on failure |
 
-* **Prometheus**: Time-series database running on local **EXT4 SSD storage** to ensure high IOPS and prevent TSDB corruption common with network filesystems.
-* **Grafana & Loki**: Data persisted directly to a **15TB NAS (NFS Mount)** for high-capacity log retention and dashboard persistence.
-* **Automated Backups**: Nightly snapshots of Prometheus data are pushed to the NAS via an automated script, providing 3-2-1 backup methodology.
-* **Observability**: Integrated monitoring for a distributed Proxmox cluster, AI workloads (**RTX 3090 Ti**), and 20+ containerized applications.
+---
+
+## 🏗️ Architecture
 
 ```mermaid
-graph LR
-    subgraph "External / Main Network"
-        User[User Browser]
-    end
-
-    subgraph "Monitoring VLAN (Isolated)"
-        NPM[Nginx Proxy Manager]
+graph TB
+    subgraph "Observability Stack (Raspberry Pi 4)"
+        Prom[Prometheus 39 targets]
+        Graf[Grafana 6 dashboards]
+        Loki[Loki logs]
+        Alert[Alertmanager]
+        BlackEx[Blackbox Exporter]
+        MCPSrv[MCP Server<br/>port 8000]
         
-        subgraph "Docker Stack"
-            Grafana[Grafana]
-            Prom[Prometheus]
-            Loki[Loki]
-            cAdvisor[cAdvisor]
-            NodeExp[Node Exporter]
-        end
+        Prom --> Graf
+        Prom --> Alert
+        BlackEx --> Prom
+        Loki --> Graf
+        Graf --> MCPSrv
     end
 
-    subgraph "Home Lab Infrastructure"
-        Servers[Proxmox / NAS / Pi]
+    subgraph "AI Nodes"
+        LLM1[llm-server<br/>RTX 3090 Ti<br/>DCGM Exporter]
+        LLM2[llm-server2<br/>RX 7800 XT<br/>HWMon Collector]
+        Hermes[Hermes Agent<br/>AIOps Profile]
     end
 
-    %% Access Flow
-    User -->|HTTPS/443| NPM
-    NPM -->|HTTP/3000| Grafana
+    subgraph "Proxmox Cluster"
+        PVE1[pve1 20c/32GB]
+        PVE2[pve2 6c/33GB]
+        PVE3[pve3 32c/132GB]
+    end
 
-    %% Data Query Flow
-    Grafana -.->|Query| Prom
-    Grafana -.->|Query| Loki
+    subgraph "Notifications"
+        TG[Telegram]
+    end
 
-    %% Collection & Production Flow
-    Prom -->|Scrape| cAdvisor
-    Prom -->|Scrape| NodeExp
-    Servers -.->|Logs/Metrics| Loki
-    Servers -.->|Metrics| NodeExp
+    Prom -->|scrape :9100| PVE1
+    Prom -->|scrape :9100| PVE2
+    Prom -->|scrape :9100| PVE3
+    Prom -->|scrape :9835| LLM1
+    Prom -->|scrape :9100| LLM2
+
+    Alert -->|critical| TG
+    Alert -->|webhook| Hermes
+    Hermes -->|MCP tools| MCPSrv
+    Hermes -->|investigate & remediate| TG
     
-    %% Styling
-    style NPM fill:#f9f,stroke:#333,stroke-width:2px
-    style Grafana fill:#69f,stroke:#333
-    style Servers fill:#fff,stroke:#333,stroke-dasharray: 5 5
+    MCPSrv -.->|query metrics| Prom
+    MCPSrv -.->|manage dashboards| Graf
 ```
 
+### Data Flow
+
+1. **Collect** — Node Exporters, DCGM, AMD hwmon, Blackbox probes push metrics to Prometheus
+2. **Visualize** — Grafana queries Prometheus across 6 dashboards with per-host filtering
+3. **Alert** — 5 critical rules trigger on threshold breaches, delivered to Telegram
+4. **Investigate** — Critical alerts also POST to Hermes AIOps webhook → Qwen-9B investigates via Grafana MCP tools
+5. **Remediate** — AIOps agent SSH-es into affected hosts, prunes disk, restarts services, or escalates
+6. **Report** — Full investigation report sent to Telegram: what happened, what it found, what it did
+
 ---
 
-## 🚀 Automated Deployment (CI/CD)
+## 📦 Dashboard Catalog
 
-This project uses a **GitOps** approach. Changes pushed to the `main` branch trigger a GitHub Actions workflow that:
+| Dashboard | UID | Description | Preview |
+|-----------|-----|-------------|---------|
+| **🏠 Infrastructure Overview** | `infrastructure-overview` | CPU, memory, disk, network across all hosts | Aggregated big picture |
+| **🔍 Per-Node Detail** ⭐ | `per-node-detail` | **Select any host** from dropdown → see its CPU, memory, disk, network, GPU | Per-host drill-down |
+| **🤖 AI Infrastructure** ⭐ | `ai-infrastructure-monitoring` | GPU fleet overview, NVIDIA RTX 3090 Ti, AMD RX 7800 XT, AI node health, AIOps engine | Full AI workload view |
+| **🎮 GPU Monitoring** | `gpu-monitoring` | Legacy GPU metrics dashboard | GPU stats |
+| **🤖 AIOps Engine** | `aiops-engine` | Alert analysis, LLM analysis rate, remediation tracking | AI automation |
+| **Homelab System** | `homelab-system` | Proxmox hypervisor-specific metrics | PVE cluster health |
 
-### CI Pipeline (every push/PR)
-1. **YAML Syntax Validation** — validates docker-compose.yml and prometheus.yml
-2. **Docker Compose Config Validation** — ensures compose file parses correctly
-3. **Secret Detection Scan** — prevents accidental commits of credentials
-4. **Port Conflict Detection** — validates no duplicate port mappings
-5. **Resource Limit Validation** — checks memory constraints are defined
-6. **Service Dependency Check** — verifies depends_on relationships are valid
-7. **Image Reference Validation** — confirms all images are referenced correctly
-8. **Volume Path Consistency Check** — validates mount configurations
-9. **Prometheus Config Validation** — checks scrape_configs and targets
-10. **Targets JSON Validation** — validates scrape target structure
-11. **Script Syntax Validation** — checks shell scripts for syntax errors
-12. **Test Report Generation** — summarizes health check coverage
+### ✨ New in this Release
 
-### CD Pipeline (main branch push only)
-1. **Pre-flight Checks** — verifies SSH/SCP availability and secrets configuration
-2. **SSH Key Preparation** — sets up passwordless auth to Raspberry Pi
-3. **File Sync via SCP** — transfers all config files to the target host
-4. **Remote Docker Deployment** — pulls images, recreates containers
-5. **Post-deploy Health Check** — validates all services are responding
+- **🔍 Per-Node Detail dashboard** — Dynamic host selector lets you pick any target and see its full system health in one view
+- **AMD GPU power-based metrics** — RX 7800 XT uses power draw (watts) as the primary utilization proxy (RDNA3 `gpu_busy_percent` reports "engine active" not compute utilization)
+- **Fixed frequency scaling** — GPU/Memory clock values now display correctly in MHz
 
-### GitHub Secrets Required
+---
 
-| Secret | Description |
-|--------|-------------|
-| `PI_HOST` | IP or hostname of your Raspberry Pi |
-| `PI_USERNAME` | SSH username for the Raspberry Pi |
-| `SSH_PRIVATE_KEY` | SSH private key (ed25519 recommended) for passwordless auth |
-| `GRAFANA_PASSWORD` | Admin password for Grafana |
+## 🚨 Alerting Pipeline
 
-### GitHub Repository Variables
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `DOMAIN` | Your base domain for services | `home.lab` |
-| `NAS_LOG_PATH` | NAS mount path for logs/data | `/mnt/nas/monitoring` |
-
-### Self-Hosted Runner
-
-The deployment job requires a **self-hosted GitHub Actions runner** on your Raspberry Pi:
-
-```yaml
-# .github/workflows/deploy.yml uses:
-#   runs-on: [self-hosted, Linux, X64, home-lab]
+```
+┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  Prometheus  │────▶│  Grafana Alert   │────▶│   Telegram Bot  │
+│  (threshold) │     │  (rule evaluated)│     │  @your_bot      │
+└─────────────┘     └────────┬─────────┘     └─────────────────┘
+                             │ critical only
+                             ▼
+                    ┌──────────────────┐     ┌─────────────────┐
+                    │  Hermes AIOps     │────▶│ Investigation   │
+                    │  Webhook Handler  │     │ + Telegram Report│
+                    └──────────────────┘     └─────────────────┘
 ```
 
-To set up the runner, follow the [GitHub Actions self-hosted runner documentation](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/adding-self-hosted-runners).
+### Alert Rules (Critical — only these fire to Telegram)
+
+| Rule | Condition | For | Severity |
+|------|-----------|-----|----------|
+| ❌ Host Down | `up == 0` | 5m | Critical |
+| 💾 Critical Disk Usage | Disk >92% | 3m | Critical |
+| 🌡️ NVIDIA GPU Overheat | Temp >85°C | 5m | Critical |
+| 🤖 AI Service Down | `up{job="ai_stack"} == 0` | 2m | Critical |
+| 🧠 Critical Memory | RAM >92% | 5m | Critical |
+
+**Why only critical?** Warning-level alerts create noise and alert fatigue. Critical-only ensures every notification demands attention.
 
 ---
 
-## 📦 Services
+## 🤖 AIOps Agent — LLM-Powered Incident Response
 
-| Service | Image | Port | Purpose |
-|---------|-------|------|---------|
-|| **Prometheus** | `prom/prometheus:latest` | 9090 | Time-series metrics collection |
-|| **Grafana** | `grafana/grafana:latest` | 3000 | Dashboards and visualization |
-|| **Loki** | `grafana/loki:latest` | 3100 | Log aggregation |
-|| **cAdvisor** | `gcr.io/cadvisor/cadvisor:latest` | 8080/8081 | Container resource usage |
-|| **Node Exporter** | `prom/node-exporter:latest` | 9100 | Host-level hardware metrics |
-|| **Alertmanager** | `prom/alertmanager:latest` | 9093 | Alert routing & notifications |
-|| **Blackbox Exporter** | `prom/blackbox-exporter:latest` | 9115 | HTTP/TCP/ICMP service probes |
+When a critical alert fires, the **AIOps agent** (dedicated Hermes profile) wakes up and:
 
-### Provisioned Dashboards
+1. **Receives** — Grafana webhook POSTs alert payload to Hermes gateway
+2. **Investigates** — Uses Grafana MCP tools (`query_prometheus`, `list_prometheus_metric_names`) to pull current metrics
+3. **Diagnoses** — Identifies root cause (e.g., /var/lib/docker at 94%)
+4. **Remediates** — SSH-es into affected host, runs targeted fix (docker prune, service restart, log rotation)
+5. **Reports** — Sends complete Telegram message: what happened, what it found, what it did, current status
 
-| Dashboard | Description | GPU Support |
-|-----------|-------------|-------------|
-| **Infrastructure Overview** | CPU, memory, disk, network across all hosts | ❌ |
-| **GPU Monitoring** | Legacy NVIDIA node_exporter metrics | ✅ NVIDIA |
-| **AI Infrastructure Monitoring** | AI node health, GPU fleet, inference metrics | ✅ NVIDIA + AMD |
-| **AIOps Engine** | Alert analysis, LLM analysis rate & remediation | ❌ |
-| **Homelab System Overview** | Proxmox hypervisor-specific metrics | ❌ |
+### Architecture
 
----
+```
+┌────────────────────────────────────────────────┐
+│           Hermes Agent (aiops profile)         │
+│                                                  │
+│  Model: Qwen-9B (local, $0/run)                 │
+│  Fallback: deepseek-v4-flash ($0.01-$0.10/m)    │
+│  Secondary: claude-haiku-4.5 ($0.10-$1.00)      │
+│                                                  │
+│  Tools:                                          │
+│  ┌────────────────────────────────────────────┐  │
+│  │  Grafana MCP (50+ tools)                   │  │
+│  │  - query_prometheus                        │  │
+│  │  - list_metric_names / label_values         │  │
+│  │  - alerting_manage_rules                   │  │
+│  │  - get_dashboard_by_uid                    │  │
+│  │  - create_annotation                       │  │
+│  └────────────────────────────────────────────┘  │
+│  ┌────────────────────────────────────────────┐  │
+│  │  terminal (SSH)                             │  │
+│  │  - Docker service management                │  │
+│  │  - Disk cleanup (docker prune, log rotate)  │  │
+│  │  - Service restart                          │  │
+│  │  - nvidia-smi / amdgpu checks               │  │
+│  └────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────┘
+```
 
-## 💾 Storage & Backup Strategy
+### MCP Server — Standard Interface for AI-Observability
 
-| Data Type | Primary Storage | Backup Target | Strategy |
-| :--- | :--- | :--- | :--- |
-| **Prometheus TSDB** | Local SSD (EXT4) | 15TB NAS (NFS) | Nightly Admin API Snapshots |
-| **Grafana DB** | 15TB NAS (NFS) | NAS RAID | Direct Persistence |
-| **Loki Logs** | 15TB NAS (NFS) | NAS RAID | Direct Persistence |
+The [Grafana MCP Server](https://github.com/grafana/mcp-grafana) (official, Apache 2.0, 3.4k ⭐) exposes 50+ tools over the Model Context Protocol:
+- **Prometheus**: Query metrics, list names, labels, values, histograms
+- **Dashboards**: Search, read, update, get panel queries
+- **Alerting**: List, create, update, delete alert rules and notification policies
+- **Loki**: Query logs, list labels, detect patterns
 
-### Automated Backups
-
-A custom bash script (`scripts/backup_prometheus.sh`) runs nightly via Cron. It:
-1. Triggers a Prometheus TSDB snapshot via the **Admin API**.
-2. Verifies the NAS mount point is active to protect local SSD capacity.
-3. Syncs the snapshot to the NAS using `rsync` with automated ownership correction.
-4. Purges local snapshots older than 7 days to maintain SSD health.
-
----
-
-## 🌐 Networking Configuration
-
-To ensure compatibility with an external **Nginx Proxy Manager (NPM)** VM, services are bound to the host's LAN IP.
-
-| Service | Internal Port | External Port | Access URL |
-| :--- | :--- | :--- | :--- |
-| **Grafana** | 3000 | 3000 | `grafana.domain.com` |
-| **Prometheus** | 9090 | 9090 | `prometheus.domain.com` |
-| **cAdvisor** | 8080 | 8081 | `cadvisor.domain.com` |
-| **Loki** | 3100 | 3100 | `loki.domain.com` |
-
-> [!NOTE]
-> **cAdvisor** is mapped to `8081` on the host to avoid conflicts with local Nginx services, but Prometheus scrapes it internally on `8080` via the Docker bridge network.
-
-> [!IMPORTANT]
-> **Prometheus Admin API** is enabled (`--web.enable-admin-api`) to facilitate automated snapshots. Access is restricted via Nginx Proxy Manager and internal VLAN isolation.
-
----
-
-## 🎯 Scrape Targets
-
-The stack currently monitors **30+ endpoints** across the lab:
-
-| Category | Count | Details |
-|----------|-------|---------|
-| **Hypervisors** | 3 | Proxmox virtualization nodes |
-| **GPU Nodes** | 2 | NVIDIA RTX + AMD Radeon (DCGM + hwmon) |
-| **App Services** | 15+ | Containers, VMs, LXCs |
-| **DNS Servers** | 2 | Primary + secondary DNS |
-| **Blackbox Probes** | 5+ | HTTP/TCP availability checks |
-| **cAdvisor** | 1 | Container resource monitoring |
-
-### GPU Monitoring Architecture
-
-**NVIDIA GPUs** — Uses NVIDIA DCGM exporter (`nvcr.io/nvidia/k8s/dcgm-exporter`):
-- GPU utilization, memory usage, temperature, power draw, clock speeds
-- Dedicated `nvidia_gpu` Prometheus scrape job
-
-**AMD GPUs** — Lightweight hwmon textfile collector:
-- Busy %, VRAM used/total, temperature, power, fan speed, clocks
-- Collected via Node Exporter's `--collector.textfile.directory` with cron
-- Metrics named `amdgpu_*` (e.g., `amdgpu_temperature_celsius`)
-
-### Adding New Targets
-
-Update `targets.json` and push to main:
+Connect **any** LLM client (Claude Desktop, Cursor, VS Code Copilot) to your observability stack:
 
 ```json
 {
-  "targets": ["new-service.your-domain:9100"],
-  "labels": { "job": "new_category" }
+  "mcpServers": {
+    "grafana": {
+      "command": "uvx",
+      "args": ["mcp-grafana"],
+      "env": {
+        "GRAFANA_URL": "http://your-server:3000",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "glsa_..."
+      }
+    }
+  }
 }
 ```
 
 ---
 
-## 🛠️ Local Development & Testing
+## 🖥️ Services
 
-You can run the full CI validation locally using `act`:
+| Service | Purpose | Port | Resource Limits |
+|---------|---------|------|-----------------|
+| **Prometheus** | Time-series database (30d retention) | 9090 | 2GB RAM, 1 CPU |
+| **Grafana** | Visualization & dashboards | 3000 | 1GB RAM, 0.5 CPU |
+| **Loki** | Log aggregation | 3100 | 1GB RAM, 0.5 CPU |
+| **Alertmanager** | Alert routing & deduplication | 9093 | — |
+| **Blackbox Exporter** | HTTP/TCP/ICMP health probes | 9115 | — |
+| **cAdvisor** | Container-level metrics | 8081 | 512MB RAM, 0.5 CPU |
+| **Node Exporter** | Host-level metrics | 9100 | 128MB RAM, 0.25 CPU |
+| **Grafana MCP** | LLM-accessible observability API | 8000 | — |
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Docker & Docker Compose v2
+- A Raspberry Pi 4+ (or any Linux host with Docker)
+- Domain with DNS pointing to your host (or use local IP)
+- Telegram bot token + chat ID (for alerts)
+
+### Installation
 
 ```bash
-# Install act (if not installed)
-brew install act
+# Clone the repo
+git clone https://github.com/nicolasnkGH/monitoring-stack.git
+cd monitoring-stack
 
-# Run CI checks locally
-act ci
+# Configure environment
+cp .env.example .env
+# Edit .env with your credentials:
+#   DOMAIN=your-domain.com
+#   GRAFANA_PASSWORD=secure-password-here
+#   GRAFANA_MCP_TOKEN=glsa_your-service-account-token
+#   TELEGRAM_BOT_TOKEN=your-bot-token
+#   TELEGRAM_CHAT_ID=your-chat-id
 
-# Run the full pipeline (CI + deploy)
-act push
+# Start the stack
+docker compose up -d
+
+# Verify
+docker compose ps
+curl http://localhost:9090/-/healthy  # Prometheus
+curl http://localhost:3000/api/health # Grafana
 ```
 
-Or manually validate configurations:
+### First-Time Setup
+
+1. Open Grafana at `https://grafana.${DOMAIN}` (login: `admin` / your password)
+2. Navigate to **Alerting** → **Contact points** — verify Telegram is configured
+3. Open **Alerting** → **Alert rules** — 5 critical rules are pre-provisioned
+4. Open **Dashboards** — browse the 6 pre-loaded dashboards
+
+### CI/CD Deployment
 
 ```bash
-# Validate docker-compose.yml
-docker compose config --quiet
+# Fork this repo
+# Configure GitHub Secrets:
+#   DEPLOY_HOST=your-server-ip
+#   DEPLOY_USER=your-ssh-user
+#   SSH_PRIVATE_KEY=your-private-key
+#   GRAFANA_PASSWORD=...
+#   TELEGRAM_BOT_TOKEN=...
+#   TELEGRAM_CHAT_ID=...
 
-# Validate prometheus.yml
-docker run --rm -v $(pwd):/config prom/prometheus:latest --config.file=/config/prometheus.yml --dry-run
-
-# Check for port conflicts
-docker compose ps  # should show no conflicts
+# Push to main → CI validates → CD deploys via SSH
 ```
 
 ---
 
-## 🛠️ Maintenance Cheatsheet
+## 🛠️ GPU Monitoring Setup
 
-**Reset Grafana Admin Password:**
+### NVIDIA (DCGM Exporter)
+
 ```bash
-docker exec -it grafana grafana cli admin reset-admin-password 'your-new-password'
+docker run -d --gpus all --name dcgm-exporter \
+  -p 9835:9400 \
+  nvcr.io/nvidia/k8s/dcgm-exporter:latest
 ```
 
-**Check Prometheus Scrape Status:**
-Visit `http://<pi-ip>:9090/targets` to verify all endpoints are `UP`.
-
-**View Logs:**
-```bash
-docker compose logs -f [service_name]
+Then add to `targets.json`:
+```json
+{"targets": ["your-nvidia-host:9835"], "labels": {"job": "nvidia_gpu"}}
 ```
 
-**Manually Trigger Prometheus Backup:**
+### AMD (hwmon Textfile Collector)
+
 ```bash
-~/docker/monitoring/scripts/backup_prometheus.sh
+# Install on AMD GPU node as a cron job:
+# Runs every 60s, writes to node_exporter textfile collector
+./scripts/amdgpu_metrics.sh
 ```
 
-**Verify Last Night's Backup:**
-```bash
-ls -lh /mnt/monitoring/backups/prometheus
-```
-
-**Check Backup Logs:**
-```bash
-tail -f ~/docker/monitoring/backup.log
-```
-
----
-
-## ♻️ Disaster Recovery (Restore Procedure)
-
-In the event of a local SSD failure or data corruption, follow these steps to restore Prometheus from a NAS snapshot:
-
-1. **Stop the Service**:
-   ```bash
-   docker compose stop prometheus
-   ```
-2. **Clear Corrupted Data**:
-   ```bash
-   sudo rm -rf ~/docker/monitoring/prometheus_data/data/*
-   ```
-3. **Restore from NAS**:
-   Find the latest snapshot on your NAS and sync it back to the local SSD:
-   ```bash
-   # Replace [SNAPSHOT_NAME] with your target folder
-   sudo rsync -av /mnt/monitoring/backups/prometheus/[SNAPSHOT_NAME]/ ~/docker/monitoring/prometheus_data/data/
-   ```
-4. **Fix Permissions**:
-   Ensure the Prometheus user (`65534`) owns the restored files:
-   ```bash
-   sudo chown -R 65534:65534 ~/docker/monitoring/prometheus_data/data
-   ```
-5. **Restart Service**:
-   ```bash
-   docker compose up -d prometheus
-   ```
-
----
-
-## 🔒 Security Note
-
-This stack is designed for a hardened home lab environment. It assumes:
-
-**Network Isolation:** All containers run on a dedicated Monitoring VLAN.
-
-**Reverse Proxy:** Traffic is handled via an internal Nginx Proxy Manager (NPM).
-
-**Encryption:** Forced HTTPS/SSL via local certificates; all port 80/HTTP traffic is blocked at the firewall level.
-
-**Access Control:** No direct WAN exposure; access is restricted to local/VPN clients.
-
-**CI/CD Security:**
-- Secrets are stored in GitHub Secrets, never in code
-- `.env` files are gitignored
-- All deployments require CI validation to pass first
-- Self-hosted runner runs on isolated network
+Metrics: `amdgpu_temperature_celsius`, `amdgpu_power_avg_watts`, `amdgpu_vram_used_bytes`, `amdgpu_gpu_freq_mhz`, `amdgpu_fan_rpm`
 
 ---
 
@@ -328,19 +303,72 @@ This stack is designed for a hardened home lab environment. It assumes:
 
 ```
 monitoring-stack/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml          # CI/CD pipeline (validated on every push)
+├── .github/workflows/
+│   └── deploy.yml              # 12-stage CI/CD pipeline
+├── grafana/
+│   ├── dashboards/
+│   │   ├── ai-infrastructure-monitoring.json  # GPU fleet + AI nodes
+│   │   └── per-node-detail.json               # Per-host drill-down ⭐
+│   └── provisioning/
+│       ├── dashboards/dashboards.yml          # Auto-provisioning
+│       ├── datasources/datasource.yml         # Prometheus datasource
+│       └── config/grafana.ini                 # Hardened config
+├── alertmanager/
+│   ├── blackbox.yml            # HTTP/TCP/ICMP probe modules
+│   └── rules/                  # Prometheus alert rules
 ├── scripts/
-│   └── backup_prometheus.sh    # Automated backup script
-├── .env.example                # Environment variable template
-├── .gitignore
-├── docker-compose.yml          # Service definitions
-├── prometheus.yml              # Prometheus scrape configuration
-├── targets.json                # Dynamic scrape targets
+│   └── backup_prometheus.sh    # Automated NAS backup (7-day retention)
+├── docker-compose.yml          # Full service stack (8 services)
+├── prometheus.yml              # Scrape configuration
+├── targets.json                # Dynamic scrape targets (sanitized)
+├── .env.example                # Environment variables template
 └── README.md                   # This file
 ```
 
 ---
 
-Maintained by Nicolas Teixeira | 2026
+## 🔒 Security
+
+- **Network isolation**: All containers on dedicated monitoring VLAN/bridge
+- **HTTPS/SSL**: Forced via reverse proxy (Nginx Proxy Manager)
+- **Zero secrets in code**: `.env` gitignored, all secrets in GitHub Secrets
+- **MCP auth**: Bearer token required for all AI/Observability queries
+- **No direct WAN exposure**: Access restricted to local/VPN clients
+
+---
+
+## 📈 Performance
+
+| Metric | Value |
+|--------|-------|
+| Scrape targets | 39+ |
+| Dashboard panels | 50+ across 6 dashboards |
+| Alert rules | 5 (critical-only) |
+| Storage retention | 30 days (Prometheus), unlimited (Loki to NAS) |
+| Memory usage (stack) | ~5GB total |
+| AIOps inference cost | $0/run (local Qwen-9B) |
+| Backup interval | Daily, 7-day retention |
+
+---
+
+## 🧑‍💻 About
+
+Built by **Nicolas Teixeira** — Software Engineering student at UNESA, homelab enthusiast, and automation addict.
+
+This stack demonstrates practical expertise in:
+- **DevOps/Infrastructure**: Docker Compose, Grafana, Prometheus, CI/CD, Linux administration
+- **AI/ML**: LLM integration with observability, GPU fleet management, model serving
+- **Automation**: GitHub Actions, webhook-driven incident response, MCP protocol
+- **Systems**: Distributed monitoring, alerting, backup/DR, performance tuning
+
+---
+
+## 📄 License
+
+MIT — use freely, contribute back when you can.
+
+---
+
+<p align="center">
+  <sub>If this stack got you hired, star it ⭐ and tell me about it.</sub>
+</p>

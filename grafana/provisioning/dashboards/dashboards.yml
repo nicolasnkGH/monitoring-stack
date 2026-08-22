@@ -15,4 +15,5 @@ providers:
         - gpu-monitoring.json
         - aiops-engine.json
         - ai-infrastructure-monitoring.json
+        - per-node-detail.json
       foldersFromFilesStructure: false
